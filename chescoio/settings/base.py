@@ -62,6 +62,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'orders.context_processors.cart',
             ],
         },
     },
@@ -134,6 +135,37 @@ PRINTIFY_ACCESS_TOKEN = os.environ.get('PRINTIFY_ACCESS_TOKEN', '')
 # signature verification lands in Sprint 4; the Sprint 2 endpoint stub only
 # logs payloads to WebhookEvent.
 PRINTIFY_WEBHOOK_SECRET = os.environ.get('PRINTIFY_WEBHOOK_SECRET', '')
+
+
+# =============================================================================
+# Stripe (Sprint 3+)
+# =============================================================================
+
+# Stripe API keys. Use sk_test_... / pk_test_... during development; flip to
+# sk_live_... / pk_live_... at Sprint 5 launch. Stripe Tax is enabled via the
+# `automatic_tax` flag on Checkout Sessions — no code config needed here, but
+# PA must be registered under Stripe Tax > Registrations in the dashboard for
+# the PA clothing exemption ($0 sales tax) to apply.
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
+
+# Webhook signing secret. For dev: get from `stripe listen --forward-to ...`.
+# For prod: from Stripe dashboard > Developers > Webhooks > endpoint details.
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+
+# Cart cleanup threshold. The clear_old_carts management command deletes carts
+# whose updated_at is older than this. 7 days per the canonical models inventory
+# (sprintplans/eg_apparel_sprint_plan.md). Note: Django's default
+# SESSION_COOKIE_AGE is 14 days, so a returning visitor between day 7 and 14
+# will have an intact session with an empty cart — that's intentional.
+CART_EXPIRY_DAYS = int(os.environ.get('CART_EXPIRY_DAYS', 7))
+
+# Shipping rate quote cache TTL in the session (seconds). After this elapses
+# the cart re-quotes shipping from Printify on the next checkout attempt. Short
+# enough that stale rates don't follow customers around, long enough that
+# tabbing away and back doesn't trigger redundant API calls.
+CART_SHIPPING_QUOTE_TTL_SECONDS = int(os.environ.get('CART_SHIPPING_QUOTE_TTL_SECONDS', 900))
+
 
 
 # =============================================================================

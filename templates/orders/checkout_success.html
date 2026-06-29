@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Order confirmation \u2014 {{ request.brand.name }}{% endblock %}
+
+{% block meta_description %}Your order is confirmed.{% endblock %}
+
+{# Suppress crawlers and social previews from the success page \u2014 it's a
+   transactional landing, not a shareable URL. #}
+{% block extra_head %}
+<meta name="robots" content="noindex, nofollow">
+{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-3xl px-5 sm:px-8 py-10 sm:py-14 w-full">
+    {% include "orders/_checkout_success_status.html" %}
+</section>
+{% endblock %}

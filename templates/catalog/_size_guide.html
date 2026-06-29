@@ -1,11 +1,13 @@
-{# Size guide partial.
-   v1: lists the sizes available for the current product and provides a generic
-   fitting note. Per-blueprint measurement tables (chest / length in inches)
-   require a separate Printify catalog API call:
-     GET /v1/catalog/blueprints/{blueprint_id}/print_providers/{print_provider_id}/variants.json
-   and per-blueprint schema mapping (different garments measure differently).
-   Deferred to v2 — Printify's own product mockups already include detailed
-   sizing on the customer's order confirmation. #}
+{% comment %}
+Size guide partial.
+v1: lists the sizes available for the current product and provides a generic
+fitting note. Per-blueprint measurement tables (chest / length in inches)
+require a separate Printify catalog API call:
+  GET /v1/catalog/blueprints/{blueprint_id}/print_providers/{print_provider_id}/variants.json
+and per-blueprint schema mapping (different garments measure differently).
+Deferred to v2 — Printify's own product mockups already include detailed
+sizing on the customer's order confirmation.
+{% endcomment %}
 
 {% if sizes %}
 <div class="text-sm text-neutral-700">

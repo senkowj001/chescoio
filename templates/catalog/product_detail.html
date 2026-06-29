@@ -111,22 +111,39 @@
                 <p id="variant-status" class="text-sm text-neutral-500 min-h-[1.25rem]"></p>
             </div>
 
-            {# ----- Add to cart button (disabled in Sprint 2) ----- #}
+            {# ----- Add to cart button ----- #}
+            <style>
+              /* Inline styles win over Tailwind utilities, so the brand-color
+                 base + neutral disabled state are easiest to express in raw CSS. */
+              #add-to-cart-btn {
+                background-color: var(--color-brand-primary);
+                color: #fff;
+              }
+              #add-to-cart-btn:not(:disabled):hover { opacity: 0.9; }
+              #add-to-cart-btn:disabled {
+                background-color: rgb(212 212 212); /* neutral-300 */
+                color: rgb(115 115 115);            /* neutral-500 */
+                cursor: not-allowed;
+                opacity: 1;
+              }
+              #add-to-cart-btn.is-flashing { background-color: var(--color-brand-accent); }
+            </style>
             <div class="mt-6">
                 <button type="button"
                         id="add-to-cart-btn"
                         disabled
                         data-product-id="{{ product.pk }}"
-                        class="w-full sm:w-auto px-8 py-3 rounded-md font-medium
-                               bg-neutral-300 text-neutral-500 cursor-not-allowed
-                               focus:outline-none">
+                        data-default-label="Add to cart"
+                        hx-post="{% url 'orders:cart_add' %}"
+                        hx-vals='js:{variant_id: document.getElementById("add-to-cart-btn").dataset.variantId, quantity: 1}'
+                        hx-target="#mini-cart"
+                        hx-swap="outerHTML"
+                        class="w-full sm:w-auto px-8 py-3 rounded-md font-medium transition-opacity
+                               focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-neutral-900">
                     Add to cart
                 </button>
-                <p class="mt-2 text-xs text-neutral-500">
-                    Cart and checkout launch with the storefront. Want a heads-up?
-                    Email
-                    <a href="mailto:{{ request.brand.support_email }}"
-                       class="underline">{{ request.brand.support_email }}</a>.
+                <p id="add-to-cart-feedback" class="mt-2 text-xs text-neutral-500" aria-live="polite">
+                    Select size{% if colors %} and color{% endif %} above.
                 </p>
             </div>
 
@@ -231,6 +248,7 @@
         if (!v) {
             priceEl.textContent = basePrice;
             statusEl.textContent = 'That combination is not available.';
+            cartBtn.disabled = true;
             cartBtn.dataset.variantId = '';
             return;
         }
@@ -239,13 +257,14 @@
 
         if (!v.is_available) {
             statusEl.textContent = 'Sold out in that size and color.';
+            cartBtn.disabled = true;
             cartBtn.dataset.variantId = '';
             return;
         }
 
         statusEl.textContent = 'In stock.';
+        cartBtn.disabled = false;
         cartBtn.dataset.variantId = v.id;
-        // Cart wiring lands in Sprint 3; button remains visually disabled here.
 
         // Swap main image if a variant-specific image exists.
         if (mainImg && variantImageMap[v.id]) {
@@ -255,6 +274,34 @@
 
     if (sizeSel)  sizeSel.addEventListener('change', onChange);
     if (colorSel) colorSel.addEventListener('change', onChange);
+
+    // ----- Add-to-cart feedback ----------------------------------------
+    // After a successful HTMX add, flash the button color + label briefly.
+    // On failure, surface a short error in the feedback paragraph.
+    const feedbackEl = document.getElementById('add-to-cart-feedback');
+    cartBtn.addEventListener('htmx:beforeRequest', () => {
+        cartBtn.disabled = true;
+        cartBtn.dataset.previousLabel = cartBtn.textContent;
+        cartBtn.textContent = 'Adding\u2026';
+    });
+    cartBtn.addEventListener('htmx:afterRequest', (evt) => {
+        const ok = evt.detail && evt.detail.successful;
+        if (ok) {
+            cartBtn.classList.add('is-flashing');
+            cartBtn.textContent = 'Added \u2713';
+            if (feedbackEl) feedbackEl.textContent = 'Item added to your cart.';
+            setTimeout(() => {
+                cartBtn.classList.remove('is-flashing');
+                cartBtn.textContent = cartBtn.dataset.defaultLabel || 'Add to cart';
+                // Re-evaluate enabled state in case the variant is still valid.
+                onChange();
+            }, 1400);
+        } else {
+            cartBtn.textContent = cartBtn.dataset.defaultLabel || 'Add to cart';
+            if (feedbackEl) feedbackEl.textContent = 'Could not add to cart. Try again.';
+            onChange();
+        }
+    });
 
     // Thumbnail click swaps the main image.
     thumbs.forEach(t => {

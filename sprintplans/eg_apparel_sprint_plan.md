@@ -28,7 +28,7 @@ This is the operational follow-through on the East Goshen Technologies SaaS port
 - Cloudflare in front
 - Plausible analytics
 - Meta Pixel for ad tracking (mirror HuntScrape pattern)
-- Heroku Scheduler for nightly Printify product sync
+- Heroku Scheduler for hourly Printify product sync (with `product:publish:*` webhook handlers added in Sprint 4 for near-instant publish-to-live latency)
 
 ---
 
@@ -277,7 +277,7 @@ Documented at end of Sprint 1 so the plan stays the source of truth for Sprints 
 
 # Sprint 2 — Printify Integration
 
-**Goal:** Products sync from Printify to local DB nightly. Product list and detail pages render. No cart yet.
+**Goal:** Products sync from Printify to local DB hourly, with an admin-triggered "Sync Now" action available as an operational override. Product list and detail pages render. No cart yet.
 
 **Estimated time:** 10-14 hours
 
@@ -286,7 +286,7 @@ Documented at end of Sprint 1 so the plan stays the source of truth for Sprints 
 1. `Product`, `Variant`, `ProductImage` models with full Printify field mapping
 2. `printify_client.py` service module with all needed API methods
 3. Management command `sync_printify_products` that pulls products for a given brand
-4. Heroku Scheduler job runs sync nightly at 03:00 UTC
+4. Heroku Scheduler job runs sync hourly
 5. Product list view at `/shop/` showing all active products for the current brand
 6. Product detail view at `/shop/<slug>/` with variant selector
 7. Out-of-stock variants hidden or grayed out
@@ -428,8 +428,10 @@ The sync function should upsert Product + Variants + Images in a transaction, an
 ```bash
 heroku addons:open scheduler
 # Add job: python manage.py sync_printify_products --brand=chesco.io
-# Frequency: Daily at 03:00 UTC
+# Frequency: Hourly
 ```
+
+Heroku Scheduler's three frequency options are every 10 minutes, hourly, or daily. Hourly is the right balance here: the catalog changes rarely, the polling interval is the safety net rather than the primary path (product-publish webhooks added in Sprint 4 cover the "new t-shirt published" case), and the admin "Sync Now" action (Sprint 3) handles operator-driven refreshes between scheduled runs.
 
 ## Sprint 2 acceptance criteria
 
@@ -438,7 +440,7 @@ heroku addons:open scheduler
 - [ ] Product detail page renders variants with size/color picker
 - [ ] Out-of-stock variants are visually disabled
 - [ ] Size guide displays correctly
-- [ ] Scheduler runs nightly without errors (verify via Heroku logs after first run)
+- [ ] Scheduler runs hourly without errors (verify via Heroku logs after first run)
 
 ## Sprint 2 — delivery notes (deviations from plan as written)
 
@@ -460,9 +462,10 @@ Documented at the end of Sprint 2 so the plan stays the source of truth for Spri
 - **Operational follow-up (not in code):**
   1. In Django admin, set `Brand.printify_shop_id` for chesco.io before running sync.
   2. Set `PRINTIFY_ACCESS_TOKEN` in both `.env` (local) and Heroku config vars.
-  3. After verifying a clean local sync, add the Scheduler job: `python manage.py sync_printify_products --brand=chesco.io` daily at 03:00 UTC.
+  3. After verifying a clean local sync, add the Scheduler job: `python manage.py sync_printify_products --brand=chesco.io` hourly.
   4. The Printify webhook URL to register in Printify is `https://chesco.io/webhooks/printify/`. Sprint 2 only logs events; safe to register the URL anytime, but no behavior change happens until Sprint 4.
 - **Touched `chescoio/settings/local.py` to fix a Sprint 1 latent bug.** The Sprint 1 fallback used `dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}')`. On Windows the interpolated path contains backslashes (`sqlite:///C:\django\...`) that some `dj_database_url` versions fail to parse, silently returning `{}` and giving Django the dummy backend. `makemigrations` worked (no cursor needed) but `migrate` failed with "settings.DATABASES is improperly configured. Please supply the ENGINE value." Replaced with an explicit `if DATABASE_URL: dj_database_url.parse(...) else: { 'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3' }`. Production config is unchanged (still uses `dj_database_url.config()` because Heroku always sets `DATABASE_URL`).
+- **Touched `chescoio/settings/local.py` again to fix the `load_dotenv` ordering.** Sprint 1's `local.py` ran `from .base import *` *before* `load_dotenv(.env)`. That worked as long as `base.py` didn't read any env vars at module-import time (the only env-driven thing was `DATABASE_URL`, which is read down in `local.py` itself, *after* `load_dotenv`). Sprint 2 added `PRINTIFY_ACCESS_TOKEN = os.environ.get(...)` to `base.py`, and that read happened during the `from .base import *` line — before `load_dotenv` populated `os.environ` — so the setting froze to `''` even with the token present in `.env`. Fixed by hoisting `load_dotenv` above the base import, with a small local `_PROJECT_ROOT` since `BASE_DIR` isn't defined yet at that point. Lesson for future sprints: any env var read in `base.py` requires `load_dotenv` to run first in dev. Production is unaffected (Heroku sets env vars directly, no `.env`).
 
 ---
 
@@ -484,6 +487,7 @@ Documented at the end of Sprint 2 so the plan stays the source of truth for Spri
 8. Webhook endpoint `/webhooks/stripe/` for `checkout.session.completed`
 9. `Order` and `OrderItem` records created from Stripe webhook
 10. Idempotency: `WebhookEvent` model logs every event ID, second receipt is a no-op
+11. Admin "Sync Now" action on the Brand model in Django admin — triggers `sync_printify_products` for the selected brand synchronously, surfaces success/failure with a count of products synced
 
 ## Sprint 3 implementation notes
 
@@ -512,7 +516,7 @@ class CartItem(models.Model):
         return self.variant.price_cents * self.quantity
 ```
 
-Add a periodic cleanup task: delete carts older than 30 days.
+Add a periodic cleanup task: delete carts older than 7 days. (Matches the canonical models inventory at the top of this plan. Note: Django's default `SESSION_COOKIE_AGE` is 14 days, so a returning visitor between day 7 and day 14 may have an intact session with an empty cart — that's the desired behavior; stale carts should be pruned.)
 
 ### 3.2 Stripe Checkout session
 
@@ -577,10 +581,20 @@ def stripe_webhook(request):
     except (ValueError, stripe.error.SignatureVerificationError):
         return HttpResponse(status=400)
 
-    # Idempotency check
-    if WebhookEvent.objects.filter(event_id=event["id"]).exists():
+    # Idempotency check — uniqueness is on (source, event_id), so both fields
+    # are required. Without source, a Stripe event would collide with any
+    # Printify event whose id happens to match.
+    if WebhookEvent.objects.filter(
+        source=WebhookEvent.SOURCE_STRIPE,
+        event_id=event["id"],
+    ).exists():
         return HttpResponse(status=200)
-    WebhookEvent.objects.create(event_id=event["id"], event_type=event["type"], payload=event.to_dict())
+    WebhookEvent.objects.create(
+        source=WebhookEvent.SOURCE_STRIPE,
+        event_id=event["id"],
+        event_type=event["type"],
+        payload=event.to_dict(),
+    )
 
     if event["type"] == "checkout.session.completed":
         handle_checkout_completed(event["data"]["object"])
@@ -589,6 +603,55 @@ def stripe_webhook(request):
 ```
 
 `handle_checkout_completed` creates the local `Order` record, copies line items, captures shipping address, and triggers the Printify order submission (covered in Sprint 4).
+
+### 3.5 Admin "Sync Now" action
+
+Add a Django admin action on the `Brand` model in `brands/admin.py` (or wherever Brand is registered). Implementation pattern:
+
+```python
+from django.contrib import admin, messages
+from django.core.management import call_command
+from io import StringIO
+
+@admin.register(Brand)
+class BrandAdmin(admin.ModelAdmin):
+    actions = ["sync_printify_products_now"]
+
+    @admin.action(description="Sync Printify products now")
+    def sync_printify_products_now(self, request, queryset):
+        for brand in queryset:
+            if not brand.printify_shop_id:
+                self.message_user(
+                    request,
+                    f"{brand.name}: skipped (no printify_shop_id set).",
+                    level=messages.WARNING,
+                )
+                continue
+            out = StringIO()
+            try:
+                call_command(
+                    "sync_printify_products",
+                    brand=brand.domain,
+                    stdout=out,
+                )
+                self.message_user(
+                    request,
+                    f"{brand.name}: {out.getvalue().strip().splitlines()[-1]}",
+                    level=messages.SUCCESS,
+                )
+            except Exception as exc:
+                self.message_user(
+                    request,
+                    f"{brand.name}: sync failed — {exc}",
+                    level=messages.ERROR,
+                )
+```
+
+Notes:
+- Synchronous execution is fine at the current product volume (<50 products → ~10–15s, well under Heroku's 30s request timeout). When the catalog grows past ~100 products, revisit with a background job (Celery / RQ / `django-q2`); flag this in delivery notes if scale considerations come up earlier.
+- Concurrency with the hourly Scheduler run is safe — `update_or_create` semantics in the sync command tolerate overlap. Worst case is a few redundant API calls and writes; no corruption.
+- Don't add a lock or a "sync already in progress" guard for v1. Premature complexity.
+- The admin message takes the last line of the management command's stdout, which is the end-of-run summary line (products_synced / products_failed). If that line format changes in the sync command later, adjust here too.
 
 ## Sprint 3 acceptance criteria
 
@@ -600,25 +663,29 @@ def stripe_webhook(request):
 - [ ] Shipping rate appears at Stripe checkout
 - [ ] Successful payment creates an Order record locally
 - [ ] Duplicate webhook delivery does not create duplicate orders
+- [ ] Admin "Sync Now" action on a Brand runs `sync_printify_products` synchronously and surfaces success / failure / product count in the admin message frame
 
 ---
 
-# Sprint 4 — Printify Order Submission & Status Sync
+# Sprint 4 — Printify Order Submission, Status Sync & Product Webhooks
 
-**Goal:** Paid orders auto-submit to Printify. Printify webhooks update local order status. Email notifications fire on key state changes.
+**Goal:** Paid orders auto-submit to Printify. Printify webhooks update local order status. Product-publish webhooks make new t-shirts appear on chesco.io within seconds of clicking Publish in Printify. Email notifications fire on key state changes.
 
-**Estimated time:** 8-12 hours
+**Estimated time:** 10-14 hours
 
 ## Sprint 4 deliverables
 
 1. After `checkout.session.completed`, order is auto-submitted to Printify
 2. `Order.printify_order_id` is stored once Printify accepts
 3. Webhook endpoint `/webhooks/printify/` configured to receive Printify events
-4. Webhook handles: `order:created`, `order:sent-to-production`, `order:shipment:created`, `order:shipment:delivered`
-5. Email templates (text + HTML) for: order confirmation, shipped notification with tracking
-6. django-mailer queues emails; release-phase or scheduled worker drains queue
-7. Admin shows order status, Printify order ID, tracking number, can manually retry failed submissions
-8. Failure handling: if Printify rejects the order (invalid address, out of stock), mark order as `submission_failed` and send admin alert email
+4. Webhook handles order events: `order:created`, `order:sent-to-production`, `order:shipment:created`, `order:shipment:delivered`
+5. Webhook handles product events: `product:publish:started`, `product:publish:succeeded`, `product:deleted`
+6. On `product:publish:started`, fetch the product detail from Printify, upsert locally (reusing the Sprint 2 sync code path for a single product), then call Printify's "Publish succeeded" endpoint to unlock the product card in the Printify UI. On sync failure, call "Publish failed" instead.
+7. Email templates (text + HTML) for: order confirmation, shipped notification with tracking
+8. django-mailer queues emails; release-phase or scheduled worker drains queue
+9. Admin shows order status, Printify order ID, tracking number, can manually retry failed submissions
+10. Failure handling: if Printify rejects the order (invalid address, out of stock), mark order as `submission_failed` and send admin alert email
+11. Webhook registration command: a Django management command (`register_printify_webhooks --brand=chesco.io`) that POSTs all required webhook subscriptions (order events + product events) to Printify's `/shops/{shop_id}/webhooks.json` endpoint, idempotently. Re-running it should reconcile (update existing, create missing, leave correct ones alone).
 
 ## Sprint 4 implementation notes
 
@@ -663,31 +730,53 @@ Wrap this in a try/except. On failure, set `order.status = "submission_failed"`,
 
 ### 4.2 Printify webhook
 
-Configure in Printify admin: Settings → Webhooks → Add webhook pointing at `https://chesco.io/webhooks/printify/`. Subscribe to all order events.
+Webhooks are registered programmatically via `POST /v1/shops/{shop_id}/webhooks.json`
+(no Printify dashboard UI for this). Body includes the `topic`, target `url`, and a
+`secret` *we generate and pass in*. Printify echoes that secret back in the HMAC on
+every delivery; verify in our handler.
+
+Registration is a one-off; write it as a small management command or do it from a
+Django shell. Then subscribe to all order events.
 
 ```python
 @csrf_exempt
 def printify_webhook(request):
-    # Printify signs webhooks with HMAC. Verify signature.
-    signature = request.META.get("HTTP_X_PRINTIFY_SIGNATURE", "")
-    expected = hmac.new(
+    # Printify signs webhooks with HMAC-SHA256. Header is X-Pfy-Signature,
+    # format "sha256={hexdigest}".
+    signature_header = request.META.get("HTTP_X_PFY_SIGNATURE", "")
+    expected = "sha256=" + hmac.new(
         settings.PRINTIFY_WEBHOOK_SECRET.encode(),
         request.body,
         hashlib.sha256,
     ).hexdigest()
-    if not hmac.compare_digest(signature, expected):
+    if not hmac.compare_digest(signature_header, expected):
         return HttpResponse(status=403)
 
     event = json.loads(request.body)
     event_id = event.get("id")
-    if WebhookEvent.objects.filter(event_id=event_id).exists():
+    # Source-scoped idempotency (see Sprint 2 delivery notes for the source
+    # field rationale on WebhookEvent).
+    if WebhookEvent.objects.filter(
+        source=WebhookEvent.SOURCE_PRINTIFY,
+        event_id=event_id,
+    ).exists():
         return HttpResponse(status=200)
-    WebhookEvent.objects.create(event_id=event_id, event_type=event["type"], payload=event)
+    WebhookEvent.objects.create(
+        source=WebhookEvent.SOURCE_PRINTIFY,
+        event_id=event_id,
+        event_type=event["type"],
+        payload=event,
+    )
 
     handler_map = {
+        # Order events
         "order:sent-to-production": handle_order_in_production,
         "order:shipment:created": handle_order_shipped,
         "order:shipment:delivered": handle_order_delivered,
+        # Product events
+        "product:publish:started": handle_product_publish_started,
+        "product:publish:succeeded": handle_product_publish_succeeded,
+        "product:deleted": handle_product_deleted,
     }
     handler = handler_map.get(event["type"])
     if handler:
@@ -704,6 +793,72 @@ Three templates needed for v1:
 
 Mirror the django-mailer pattern from HuntScrape: send via `mail.send()`, drain queue via Heroku Scheduler running `send_mail` and `retry_deferred` every 15 minutes.
 
+### 4.4 Product publish webhook flow
+
+Printify's "Publish" button on a product card in the Printify UI works specially for custom / API-only stores. When clicked:
+
+1. Printify **locks the product card** in their UI (so the merchant can't double-click).
+2. Printify fires `product:publish:started` to our webhook.
+3. We are expected to **do the work to make the product live on our store**, then **tell Printify** whether we succeeded or failed.
+4. Printify will then unlock the card in their UI based on our response.
+
+The relevant Printify endpoints:
+- `POST /v1/shops/{shop_id}/products/{product_id}/publishing_succeeded.json`
+- `POST /v1/shops/{shop_id}/products/{product_id}/publishing_failed.json` — payload: `{"reason": "..."}`
+
+Add these methods to `PrintifyClient` in Sprint 4 (they weren't needed in Sprint 2).
+
+The handler:
+
+```python
+def handle_product_publish_started(resource):
+    """Sync this single product from Printify, then call publishing_succeeded."""
+    shop_id = resource["shop_id"]
+    product_id = resource["id"]  # printify product id
+    brand = Brand.objects.get(printify_shop_id=shop_id)
+    client = PrintifyClient()
+    try:
+        product_data = client.get_product(shop_id, product_id)
+        # Reuse Sprint 2's per-product sync function (extract from the management
+        # command so both the command and this handler share the same upsert logic).
+        sync_single_product(brand, product_data)
+        client.publishing_succeeded(shop_id, product_id)
+    except Exception as exc:
+        logger.exception("product:publish:started sync failed")
+        client.publishing_failed(shop_id, product_id, reason=str(exc)[:200])
+        raise
+
+def handle_product_publish_succeeded(resource):
+    # Logging-only — fires after we call publishing_succeeded above.
+    # No state change needed; the local product is already in sync.
+    pass
+
+def handle_product_deleted(resource):
+    shop_id = resource["shop_id"]
+    product_id = resource["id"]
+    Product.objects.filter(
+        brand__printify_shop_id=shop_id,
+        printify_product_id=str(product_id),
+    ).update(is_published=False)
+```
+
+Refactor note for Sprint 2 code: the `sync_printify_products` management command's inner per-product upsert should be extracted into a `sync_single_product(brand, product_data)` function in `catalog/services.py` (or similar) that both the command and the webhook handler import. This is a small refactor and the right home for the logic; do it as part of Sprint 4 prep before wiring the webhook handler.
+
+**Acknowledge synchronously, sync synchronously.** The handler returns 200 only after the sync + publishing_succeeded callback completes. For a single product that's typically 2 Printify API calls + a DB transaction — well under Printify's webhook timeout. If this becomes a problem (large catalogs, slow networks), move the sync to a background queue and acknowledge the webhook immediately, but for v1 the synchronous path is simpler and the latency is what we want anyway.
+
+**Edge case:** a `product:publish:started` for a product whose `shop_id` we don't have a Brand for. Log a warning and 200; don't 500. This shouldn't happen if webhook registration is per-brand, but defensive.
+
+### 4.5 Webhook registration
+
+Printify webhooks must be registered via API — there's no dashboard UI. Build a management command `register_printify_webhooks` that:
+
+1. Lists existing webhooks for the brand's `printify_shop_id`
+2. Computes the desired set: all four `order:*` topics + three `product:*` topics, all pointing at `https://{brand.domain}/webhooks/printify/`, all using `settings.PRINTIFY_WEBHOOK_SECRET`
+3. Creates missing subscriptions, updates ones with a stale URL, leaves correct ones alone
+4. Optionally deletes stray subscriptions (`--prune` flag) so the command is fully idempotent
+
+Run it once per brand at Sprint 4 deployment time. Re-run safely whenever the topic list or URL changes.
+
 ## Sprint 4 acceptance criteria
 
 - [ ] Test order completes Stripe checkout → Printify order submitted within 30 seconds
@@ -712,6 +867,10 @@ Mirror the django-mailer pattern from HuntScrape: send via `mail.send()`, drain 
 - [ ] Shipped notification email contains valid tracking URL
 - [ ] Forcing a Printify webhook replay does not duplicate state changes
 - [ ] Failed submission triggers admin alert email
+- [ ] Clicking "Publish" on a new product in Printify causes it to appear on `https://chesco.io/shop/` within seconds (verified by stopwatch — should be <10s end to end)
+- [ ] After successful sync, the product card in the Printify UI is unlocked (publishing_succeeded callback fired)
+- [ ] Deleting a product in Printify causes it to disappear from `/shop/` on the next webhook delivery
+- [ ] `register_printify_webhooks` is idempotent — re-running it produces no duplicates
 
 ---
 

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% load catalog_extras %}
+
+{% block title %}Cart \u2014 {{ request.brand.name }}{% endblock %}
+
+{% block meta_description %}Your cart at {{ request.brand.name }}.{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-6xl px-5 sm:px-8 py-10 sm:py-14 w-full">
+
+    <header class="mb-8 sm:mb-10">
+        <p class="text-xs uppercase tracking-[0.2em] text-neutral-500 mb-3">Cart</p>
+        <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight"
+            style="color: var(--color-brand-primary);">
+            Your cart
+        </h1>
+    </header>
+
+    {% if messages %}
+    <div class="mb-6 space-y-2">
+        {% for message in messages %}
+        <div class="rounded-md border px-4 py-3 text-sm
+                    {% if message.tags == 'error' %}border-red-300 bg-red-50 text-red-800
+                    {% elif message.tags == 'warning' %}border-amber-300 bg-amber-50 text-amber-800
+                    {% else %}border-neutral-300 bg-neutral-50 text-neutral-800{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# The cart-contents block re-renders on HTMX swaps. Everything inside
+       _cart_contents.html (including the OOB mini-cart) is reused by the
+       update / remove / shipping-quote endpoints. #}
+    {% include "orders/_cart_contents.html" %}
+
+</section>
+{% endblock %}

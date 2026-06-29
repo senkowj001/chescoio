@@ -5,13 +5,19 @@ Usage: DJANGO_SETTINGS_MODULE=chescoio.settings.local
 """
 
 import os
+from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 
-from .base import *  # noqa: F401, F403
+# Load .env BEFORE importing base — base.py reads several env vars at import
+# time (PRINTIFY_ACCESS_TOKEN, PRINTIFY_WEBHOOK_SECRET, DJANGO_LOG_LEVEL).
+# If we let `from .base import *` run first, those reads see the unloaded
+# environment and freeze to their defaults, even though .env populates the
+# variables a moment later.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(_PROJECT_ROOT / '.env')
 
-# Load .env from project root for local dev
-load_dotenv(BASE_DIR / '.env')
+from .base import *  # noqa: F401, F403, E402
 
 
 # =============================================================================

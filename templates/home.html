@@ -27,6 +27,15 @@
         </p>
         {% endif %}
 
+        {# Shop CTA — surfaces the storefront from the landing page. #}
+        <div class="mt-10">
+            <a href="{% url 'catalog:product_list' %}"
+               class="inline-block px-7 py-3 rounded-md font-medium text-white transition-opacity hover:opacity-90"
+               style="background-color: var(--color-brand-primary);">
+                Shop the collection
+            </a>
+        </div>
+
         {# Accent hairline — uses the brand accent color #}
         <div class="mt-12 mx-auto h-px w-16"
              style="background-color: var(--color-brand-accent);"></div>

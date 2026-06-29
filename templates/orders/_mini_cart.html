@@ -1,0 +1,36 @@
+{# ---------------------------------------------------------------------------
+   Mini cart \u2014 header fragment.
+
+   Rendered standalone by:
+     - GET  /cart/mini/        (initial load + cart-updated event refresh)
+     - POST /cart/add/         (response after Add to Cart from product_detail)
+
+   Also OOB-swapped by /cart/items/<pk>/update and /cart/items/<pk>/remove
+   so the header count stays in sync with cart-page mutations.
+
+   The wrapping <a id="mini-cart"> is what gets replaced via hx-swap="outerHTML".
+   --------------------------------------------------------------------------- #}
+{% load catalog_extras %}
+<a id="mini-cart"
+   href="{% url 'orders:cart_page' %}"
+   class="relative inline-flex items-center gap-2 text-sm text-neutral-700 hover:text-neutral-900 transition-colors"
+   aria-label="Cart"
+   hx-swap-oob="true">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+         stroke-linejoin="round" aria-hidden="true">
+        <circle cx="9" cy="21" r="1"></circle>
+        <circle cx="20" cy="21" r="1"></circle>
+        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+    </svg>
+    <span>Cart</span>
+    {% with count=cart.item_count|default:0 %}
+    {% if count %}
+    <span class="ml-0.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5
+                 text-xs font-medium rounded-full text-white"
+          style="background-color: var(--color-brand-primary);">
+        {{ count }}
+    </span>
+    {% endif %}
+    {% endwith %}
+</a>
