@@ -1,0 +1,39 @@
+{# Size guide partial.
+   v1: lists the sizes available for the current product and provides a generic
+   fitting note. Per-blueprint measurement tables (chest / length in inches)
+   require a separate Printify catalog API call:
+     GET /v1/catalog/blueprints/{blueprint_id}/print_providers/{print_provider_id}/variants.json
+   and per-blueprint schema mapping (different garments measure differently).
+   Deferred to v2 — Printify's own product mockups already include detailed
+   sizing on the customer's order confirmation. #}
+
+{% if sizes %}
+<div class="text-sm text-neutral-700">
+    <p class="font-medium text-neutral-900 mb-2">Available sizes</p>
+    <ul class="flex flex-wrap gap-2 mb-4">
+        {% for s in sizes %}
+        <li class="px-3 py-1 border border-neutral-300 rounded">{{ s }}</li>
+        {% endfor %}
+    </ul>
+    <p class="leading-relaxed">
+        Fit runs true to size for most builds. If you're between sizes or
+        prefer a relaxed fit, size up. Garments are printed on demand, so
+        please double-check your size before ordering &mdash; we can only
+        accept returns for defects, not for sizing.
+    </p>
+    <p class="mt-3 leading-relaxed">
+        Detailed measurements vary by garment style. Reach out to
+        <a href="mailto:{{ request.brand.support_email }}"
+           class="underline hover:text-neutral-900">{{ request.brand.support_email }}</a>
+        if you need specific chest, length, or sleeve dimensions and we'll get
+        them to you.
+    </p>
+</div>
+{% else %}
+<p class="text-sm text-neutral-700">
+    Size information is not available for this product. Email
+    <a href="mailto:{{ request.brand.support_email }}"
+       class="underline hover:text-neutral-900">{{ request.brand.support_email }}</a>
+    and we'll send you the spec sheet.
+</p>
+{% endif %}

@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% load catalog_extras %}
+
+{% block title %}{{ product.title }} — {{ request.brand.name }}{% endblock %}
+
+{% block meta_description %}{{ product.title }} from {{ request.brand.name }}.{% endblock %}
+
+{% block og_title %}{{ product.title }} — {{ request.brand.name }}{% endblock %}
+{% block og_image %}{% if default_image %}{{ default_image.url }}{% else %}{{ request.brand.logo_url }}{% endif %}{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-6xl px-5 sm:px-8 py-10 sm:py-14 w-full">
+
+    <nav class="mb-6 text-sm text-neutral-500">
+        <a href="{% url 'catalog:product_list' %}"
+           class="hover:text-neutral-900">&larr; Back to shop</a>
+    </nav>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-10 lg:gap-14">
+
+        {# ---------- Image gallery ---------- #}
+        <div>
+            {% if default_image %}
+            <div class="aspect-square overflow-hidden rounded-lg bg-neutral-100">
+                <img id="main-image"
+                     src="{{ default_image.url }}"
+                     alt="{{ product.title }}"
+                     class="w-full h-full object-cover">
+            </div>
+            {% else %}
+            <div class="aspect-square rounded-lg bg-neutral-100 flex items-center justify-center text-neutral-400">
+                No image
+            </div>
+            {% endif %}
+
+            {% if product.images.count > 1 %}
+            <div class="mt-4 grid grid-cols-5 gap-2">
+                {% for img in product.images.all %}
+                <button type="button"
+                        data-thumb-src="{{ img.url }}"
+                        data-variant-image="{{ img.url }}"
+                        data-variant-ids="{{ img.variant_ids|join:',' }}"
+                        class="thumb aspect-square overflow-hidden rounded-md bg-neutral-100 border-2
+                               {% if img.is_default %}border-neutral-900{% else %}border-transparent{% endif %}
+                               hover:border-neutral-400 transition-colors">
+                    <img src="{{ img.url }}"
+                         alt=""
+                         loading="lazy"
+                         class="w-full h-full object-cover">
+                </button>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        {# ---------- Buy box ---------- #}
+        <div>
+            <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight leading-tight"
+                style="color: var(--color-brand-primary);">
+                {{ product.title }}
+            </h1>
+
+            <p id="price-display" class="mt-3 text-2xl text-neutral-900">
+                {% with price=product.display_price_cents %}
+                {% if price %}from {{ price|cents }}{% else %}—{% endif %}
+                {% endwith %}
+            </p>
+
+            {% if product.description %}
+            <div class="mt-6 prose prose-neutral max-w-none text-neutral-700 leading-relaxed">
+                {{ product.description|safe }}
+            </div>
+            {% endif %}
+
+            {# ----- Variant selector ----- #}
+            <div class="mt-8 space-y-4">
+                {% if sizes %}
+                <div>
+                    <label for="size-select"
+                           class="block text-sm font-medium text-neutral-900 mb-1.5">
+                        Size
+                    </label>
+                    <select id="size-select"
+                            class="w-full px-3 py-2.5 border border-neutral-300 rounded-md bg-white
+                                   focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900">
+                        <option value="">Select a size</option>
+                        {% for s in sizes %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                {% if colors %}
+                <div>
+                    <label for="color-select"
+                           class="block text-sm font-medium text-neutral-900 mb-1.5">
+                        Color
+                    </label>
+                    <select id="color-select"
+                            class="w-full px-3 py-2.5 border border-neutral-300 rounded-md bg-white
+                                   focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900">
+                        <option value="">Select a color</option>
+                        {% for c in colors %}
+                        <option value="{{ c }}">{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                <p id="variant-status" class="text-sm text-neutral-500 min-h-[1.25rem]"></p>
+            </div>
+
+            {# ----- Add to cart button (disabled in Sprint 2) ----- #}
+            <div class="mt-6">
+                <button type="button"
+                        id="add-to-cart-btn"
+                        disabled
+                        data-product-id="{{ product.pk }}"
+                        class="w-full sm:w-auto px-8 py-3 rounded-md font-medium
+                               bg-neutral-300 text-neutral-500 cursor-not-allowed
+                               focus:outline-none">
+                    Add to cart
+                </button>
+                <p class="mt-2 text-xs text-neutral-500">
+                    Cart and checkout launch with the storefront. Want a heads-up?
+                    Email
+                    <a href="mailto:{{ request.brand.support_email }}"
+                       class="underline">{{ request.brand.support_email }}</a>.
+                </p>
+            </div>
+
+            {# ----- Size guide ----- #}
+            <details class="mt-8 border-t border-neutral-200 pt-6">
+                <summary class="cursor-pointer text-sm font-medium text-neutral-900 hover:text-neutral-700">
+                    Size guide
+                </summary>
+                <div class="mt-4">
+                    {% include "catalog/_size_guide.html" %}
+                </div>
+            </details>
+
+        </div>
+    </div>
+</section>
+
+{# ---------- Variant selector script ---------- #}
+{# A small vanilla-JS coordinator: when size + color are both chosen, find the   #}
+{# matching variant, update the price, swap the main image if a variant-specific #}
+{# image exists, and surface availability state. No frameworks for ~80 lines.    #}
+{{ variants_data|json_script:"variants-data" }}
+<script>
+(function () {
+    const dataEl = document.getElementById('variants-data');
+    if (!dataEl) return;
+
+    const variants = JSON.parse(dataEl.textContent);
+    const sizeSel  = document.getElementById('size-select');
+    const colorSel = document.getElementById('color-select');
+    const priceEl  = document.getElementById('price-display');
+    const statusEl = document.getElementById('variant-status');
+    const mainImg  = document.getElementById('main-image');
+    const thumbs   = document.querySelectorAll('.thumb');
+    const cartBtn  = document.getElementById('add-to-cart-btn');
+
+    const basePrice = priceEl ? priceEl.textContent.trim() : '';
+
+    // Build variant-id -> image-url map from thumbnails (Printify tags each
+    // image with the variant_ids it represents; we embed that in data attrs
+    // via the thumbnails below).
+    const variantImageMap = {};
+    document.querySelectorAll('[data-variant-image]').forEach(el => {
+        const ids = (el.dataset.variantIds || '').split(',').map(s => parseInt(s, 10));
+        ids.forEach(id => { if (id) variantImageMap[id] = el.dataset.variantImage; });
+    });
+
+    function fmtCents(c) {
+        if (!c || c <= 0) return '—';
+        return '$' + (c / 100).toFixed(2);
+    }
+
+    function findMatch(size, color) {
+        return variants.find(v =>
+            (!size || v.size === size) &&
+            (!color || v.color === color)
+        );
+    }
+
+    // Disable option items that have no available variant given the other selection.
+    function refreshAvailability() {
+        const size  = sizeSel  ? sizeSel.value  : '';
+        const color = colorSel ? colorSel.value : '';
+
+        if (colorSel) {
+            for (const opt of colorSel.options) {
+                if (!opt.value) continue;
+                const exists = variants.some(v =>
+                    v.color === opt.value && (!size || v.size === size) && v.is_available
+                );
+                opt.disabled = !exists;
+            }
+        }
+        if (sizeSel) {
+            for (const opt of sizeSel.options) {
+                if (!opt.value) continue;
+                const exists = variants.some(v =>
+                    v.size === opt.value && (!color || v.color === color) && v.is_available
+                );
+                opt.disabled = !exists;
+            }
+        }
+    }
+
+    function onChange() {
+        refreshAvailability();
+        const size  = sizeSel  ? sizeSel.value  : '';
+        const color = colorSel ? colorSel.value : '';
+
+        // Both must be selected (when both exist) before we treat as resolved.
+        const sizeReady  = !sizeSel  || size;
+        const colorReady = !colorSel || color;
+        if (!sizeReady || !colorReady) {
+            priceEl.textContent = basePrice;
+            statusEl.textContent = '';
+            cartBtn.disabled = true;
+            cartBtn.dataset.variantId = '';
+            return;
+        }
+
+        const v = findMatch(size, color);
+        if (!v) {
+            priceEl.textContent = basePrice;
+            statusEl.textContent = 'That combination is not available.';
+            cartBtn.dataset.variantId = '';
+            return;
+        }
+
+        priceEl.textContent = fmtCents(v.price_cents);
+
+        if (!v.is_available) {
+            statusEl.textContent = 'Sold out in that size and color.';
+            cartBtn.dataset.variantId = '';
+            return;
+        }
+
+        statusEl.textContent = 'In stock.';
+        cartBtn.dataset.variantId = v.id;
+        // Cart wiring lands in Sprint 3; button remains visually disabled here.
+
+        // Swap main image if a variant-specific image exists.
+        if (mainImg && variantImageMap[v.id]) {
+            mainImg.src = variantImageMap[v.id];
+        }
+    }
+
+    if (sizeSel)  sizeSel.addEventListener('change', onChange);
+    if (colorSel) colorSel.addEventListener('change', onChange);
+
+    // Thumbnail click swaps the main image.
+    thumbs.forEach(t => {
+        t.addEventListener('click', () => {
+            const src = t.dataset.thumbSrc;
+            if (mainImg && src) mainImg.src = src;
+            thumbs.forEach(x => x.classList.remove('border-neutral-900'));
+            thumbs.forEach(x => { x.classList.add('border-transparent'); });
+            t.classList.remove('border-transparent');
+            t.classList.add('border-neutral-900');
+        });
+    });
+
+    refreshAvailability();
+})();
+</script>
+{% endblock %}
