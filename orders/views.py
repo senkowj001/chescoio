@@ -63,6 +63,23 @@ logger = logging.getLogger(__name__)
 
 SESSION_KEY_SHIPPING_QUOTE = 'cart_shipping_quote'
 
+# Polling budget on the checkout-success page. At 2 seconds per poll, 15
+# attempts gives the Stripe webhook 30 seconds to materialize the local Order
+# before the customer sees a timeout state. Generous enough for normal latency,
+# tight enough to surface real misconfiguration (missing `stripe listen` in
+# dev, broken webhook endpoint in prod) within half a minute.
+CHECKOUT_SUCCESS_MAX_POLLS = 15
+
+# Stripe event types we actually process. The Stripe firehose ships 7+ events
+# per checkout (product.created, price.created, charge.succeeded,
+# payment_intent.created/succeeded, charge.updated, plus the one we care
+# about). Returning 200 early for everything else keeps WebhookEvent free of
+# noise and avoids any chance of a serialization edge case on a payload shape
+# we never look at causing a 500 that Stripe would then retry.
+STRIPE_HANDLED_EVENT_TYPES = frozenset({
+    'checkout.session.completed',
+})
+
 
 def _require_brand(request):
     """Raise 404 if BrandMiddleware didn't resolve a brand. View-level guard."""
@@ -104,17 +121,21 @@ def _render_cart_response(request, cart: Cart | None, *, status: int = 200) -> H
     Render the cart contents fragment for HTMX (or full page for non-HTMX).
 
     The fragment includes an OOB swap for the header mini-cart so any cart
-    mutation updates the count in one round trip.
+    mutation updates the count in one round trip. The full-page render does
+    NOT include the OOB fragment — base.html's header already carries the
+    canonical #mini-cart, and emitting a second one would be invalid HTML.
     """
     quote = _get_cached_shipping_quote(request)
+    is_htmx_response = _is_htmx(request)
     ctx = {
         'cart': cart,
         'shipping_quote': quote,
         'total_with_shipping_cents': (
             (cart.subtotal_cents if cart else 0) + (quote['cents'] if quote else 0)
         ),
+        'include_oob_minicart': is_htmx_response,
     }
-    template = 'orders/_cart_contents.html' if _is_htmx(request) else 'orders/cart.html'
+    template = 'orders/_cart_contents.html' if is_htmx_response else 'orders/cart.html'
     return render(request, template, ctx, status=status)
 
 
@@ -306,15 +327,17 @@ def cart_shipping_quote(request):
 def _render_cart_with_error(request, cart, extra_ctx: dict):
     """Variant of _render_cart_response that surfaces a shipping_error."""
     quote = _get_cached_shipping_quote(request)
+    is_htmx_response = _is_htmx(request)
     ctx = {
         'cart': cart,
         'shipping_quote': quote,
         'total_with_shipping_cents': (
             (cart.subtotal_cents if cart else 0) + (quote['cents'] if quote else 0)
         ),
+        'include_oob_minicart': is_htmx_response,
         **extra_ctx,
     }
-    template = 'orders/_cart_contents.html' if _is_htmx(request) else 'orders/cart.html'
+    template = 'orders/_cart_contents.html' if is_htmx_response else 'orders/cart.html'
     return render(request, template, ctx)
 
 
@@ -371,9 +394,20 @@ def checkout_success(request):
         return redirect('catalog:product_list')
 
     order = Order.objects.filter(stripe_session_id=session_id).first()
+
+    try:
+        attempt = int(request.GET.get('attempt', 0))
+    except (TypeError, ValueError):
+        attempt = 0
+    attempt = max(0, attempt)
+    timed_out = order is None and attempt >= CHECKOUT_SUCCESS_MAX_POLLS
+
     ctx = {
         'session_id': session_id,
         'order': order,
+        'attempt': attempt,
+        'next_attempt': attempt + 1,
+        'timed_out': timed_out,
     }
 
     # HTMX poll fragment vs. full page.
@@ -418,6 +452,14 @@ def stripe_webhook(request):
 
     event_id = event['id']
     event_type = event['type']
+
+    # Skip events we don't process. No audit row, no handler dispatch.
+    if event_type not in STRIPE_HANDLED_EVENT_TYPES:
+        logger.debug(
+            'Stripe webhook: ignoring event_type=%s id=%s',
+            event_type, event_id,
+        )
+        return HttpResponse(status=200)
 
     # Idempotency \u2014 record-and-decide. Using get_or_create with the
     # (source, event_id) uniqueness gives us the right race semantics: only

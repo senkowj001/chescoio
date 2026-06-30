@@ -264,7 +264,7 @@ def create_stripe_checkout_session(
 # =============================================================================
 
 @transaction.atomic
-def create_order_from_stripe_session(session: dict) -> Order:
+def create_order_from_stripe_session(session: dict) -> Optional[Order]:
     """
     Build an Order + OrderItems from a Stripe checkout.session.completed event.
 
@@ -280,6 +280,15 @@ def create_order_from_stripe_session(session: dict) -> Order:
       - customer_details.email, customer_details.name, customer_details.phone
       - shipping_details.address {...}
       - metadata.brand_id, metadata.cart_id, metadata.shipping_method_code, metadata.shipping_label
+
+    Returns None (without raising) for sessions that are missing our own
+    metadata keys (brand_id / cart_id) — these are synthetic events from
+    `stripe trigger` or sessions created by something other than our own
+    checkout flow. Raising would cause Stripe to retry indefinitely, which
+    creates a retry storm with no recovery path.
+
+    Raises ValueError if metadata is present but references a brand or cart
+    that no longer exists — that's a real consistency issue worth a 500 + retry.
     """
     stripe_session_id = session['id']
 
@@ -297,6 +306,17 @@ def create_order_from_stripe_session(session: dict) -> Order:
     cart_id = metadata.get('cart_id')
     shipping_method_code = int(metadata.get('shipping_method_code') or SHIPPING_METHOD_STANDARD)
     shipping_label = metadata.get('shipping_label') or 'Standard shipping'
+
+    # Sessions we didn't create won't have our metadata. Examples: synthetic
+    # `stripe trigger` events, or sessions created by external tools sharing
+    # the same webhook endpoint. Soft-skip so Stripe doesn't retry forever.
+    if not brand_id or not cart_id:
+        logger.warning(
+            'Stripe session %s missing brand_id/cart_id metadata; not ours, '
+            'skipping order creation. metadata=%r',
+            stripe_session_id, dict(metadata),
+        )
+        return None
 
     try:
         brand = Brand.objects.get(pk=brand_id)

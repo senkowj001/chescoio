@@ -10,8 +10,15 @@
             Coming Soon
         </p>
 
-        <h1 class="text-5xl sm:text-6xl font-semibold tracking-tight leading-[1.05]"
-            style="color: var(--color-brand-primary);">
+        {% comment %}
+        Heading: charcoal (not brand-primary) lets the green show up as an
+        intentional accent on the button + kicker rather than dominating.
+        text-balance + max-w-md forces a balanced two-line wrap for names
+        like "Chester County Apparel Co." so we don't get an orphaned "Co."
+        on its own line. Brand-agnostic: short names still fit on one line.
+        {% endcomment %}
+        <h1 class="text-5xl sm:text-6xl font-semibold tracking-tight leading-[1.05]
+                   text-neutral-900 text-balance max-w-md mx-auto">
             {{ request.brand.name }}
         </h1>
 
@@ -31,14 +38,14 @@
         <div class="mt-10">
             <a href="{% url 'catalog:product_list' %}"
                class="inline-block px-7 py-3 rounded-md font-medium text-white transition-opacity hover:opacity-90"
-               style="background-color: var(--color-brand-primary);">
+               style="background-color: var(--color-brand-primary, #1a4d2e);">
                 Shop the collection
             </a>
         </div>
 
         {# Accent hairline — uses the brand accent color #}
         <div class="mt-12 mx-auto h-px w-16"
-             style="background-color: var(--color-brand-accent);"></div>
+             style="background-color: var(--color-brand-accent, #f4a261);"></div>
 
     </div>
 </section>

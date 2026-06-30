@@ -1,18 +1,18 @@
-{# ---------------------------------------------------------------------------
-   Cart contents \u2014 the swappable inner block of the cart page.
+{% comment %}
+Cart contents — the swappable inner block of the cart page.
 
-   Used as:
-     - Primary swap target for cart-mutating endpoints (update, remove, quote)
-     - Embedded inside cart.html for the initial full-page render
+Used as:
+  - Primary swap target for cart-mutating endpoints (update, remove, quote)
+  - Embedded inside cart.html for the initial full-page render
 
-   Also includes an OOB swap (#mini-cart) so the header count updates in the
-   same response. The OOB fragment is rendered via _mini_cart.html.
-   --------------------------------------------------------------------------- #}
+Also includes an OOB swap (#mini-cart) so the header count updates in the
+same response. The OOB fragment is rendered via _mini_cart.html.
+{% endcomment %}
 {% load catalog_extras %}
 <div id="cart-contents">
 
     {% if not cart or not cart.items.all %}
-        {# ----- Empty state ----- #}
+        {# Empty state #}
         <div class="text-center py-16">
             <p class="text-xs uppercase tracking-[0.2em] text-neutral-500 mb-4">
                 Cart
@@ -32,10 +32,10 @@
         </div>
 
     {% else %}
-        {# ----- Line items + shipping + checkout ----- #}
+        {# Line items + shipping + checkout #}
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
 
-            {# ===== Items column ===== #}
+            {# Items column #}
             <div class="lg:col-span-2 space-y-6">
                 {% for item in cart.items.all %}
                 {% with product=item.variant.product variant=item.variant default_image=item.variant.product.default_image %}
@@ -74,7 +74,7 @@
                                         hx-swap="outerHTML"
                                         class="w-8 h-8 inline-flex items-center justify-center
                                                text-neutral-700 hover:bg-neutral-100 transition-colors"
-                                        aria-label="Decrease quantity">\u2212</button>
+                                        aria-label="Decrease quantity">−</button>
                                 <span class="w-10 text-center text-sm tabular-nums">{{ item.quantity }}</span>
                                 <button type="button"
                                         hx-post="{% url 'orders:cart_update_item' item_pk=item.pk %}"
@@ -107,7 +107,7 @@
                 {% endfor %}
             </div>
 
-            {# ===== Summary column ===== #}
+            {# Summary column #}
             <aside class="lg:col-span-1">
                 <div class="rounded-lg border border-neutral-200/70 bg-neutral-50 p-5 sm:p-6 space-y-4">
 
@@ -127,7 +127,7 @@
                                 {% if shipping_quote %}
                                     {{ shipping_quote.cents|cents }}
                                 {% else %}
-                                    <span class="text-neutral-400">Enter ZIP \u2192</span>
+                                    <span class="text-neutral-400">Enter ZIP →</span>
                                 {% endif %}
                             </dd>
                         </div>
@@ -143,7 +143,7 @@
                         {% endif %}
                     </dl>
 
-                    {# ----- ZIP / shipping quote form ----- #}
+                    {# ZIP / shipping quote form #}
                     <form hx-post="{% url 'orders:cart_shipping_quote' %}"
                           hx-target="#cart-contents"
                           hx-swap="outerHTML"
@@ -180,7 +180,7 @@
                         {% endif %}
                     </form>
 
-                    {# ----- Checkout button (gated on a fresh shipping quote) ----- #}
+                    {# Checkout button (gated on a fresh shipping quote) #}
                     <form method="post" action="{% url 'orders:checkout_start' %}" class="pt-2">
                         {% csrf_token %}
                         <button type="submit"
@@ -205,8 +205,13 @@
 
 </div>
 
-{# -------- Out-of-band swap: keep the header mini-cart in sync --------
-   Any HTMX response that re-renders cart-contents also refreshes the header
-   count. The element id matches the one in templates/orders/_mini_cart.html,
-   which carries hx-swap-oob="true" on its outer element.                   #}
-{% include "orders/_mini_cart.html" %}
+{% comment %}
+Out-of-band swap: keep the header mini-cart in sync. Only emitted on HTMX
+swap responses (include_oob_minicart=True from the view); the initial full
+page render relies on header.html's own _mini_cart.html include. Without
+this guard, the page would carry two elements with id="mini-cart" — invalid
+HTML and an HTMX target ambiguity.
+{% endcomment %}
+{% if include_oob_minicart %}
+{% include "orders/_mini_cart.html" with as_oob=True %}
+{% endif %}

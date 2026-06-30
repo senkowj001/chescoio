@@ -114,9 +114,11 @@
             {# ----- Add to cart button ----- #}
             <style>
               /* Inline styles win over Tailwind utilities, so the brand-color
-                 base + neutral disabled state are easiest to express in raw CSS. */
+                 base + neutral disabled state are easiest to express in raw CSS.
+                 Fallback hex values guard against the unlikely case of
+                 var(--color-brand-primary) failing to resolve. */
               #add-to-cart-btn {
-                background-color: var(--color-brand-primary);
+                background-color: var(--color-brand-primary, #1a4d2e);
                 color: #fff;
               }
               #add-to-cart-btn:not(:disabled):hover { opacity: 0.9; }
@@ -126,7 +128,7 @@
                 cursor: not-allowed;
                 opacity: 1;
               }
-              #add-to-cart-btn.is-flashing { background-color: var(--color-brand-accent); }
+              #add-to-cart-btn.is-flashing { background-color: var(--color-brand-accent, #f4a261); }
             </style>
             <div class="mt-6">
                 <button type="button"

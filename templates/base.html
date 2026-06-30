@@ -20,7 +20,19 @@
     {# HTMX 2.x — used progressively for cart, variant selectors, email signup #}
     <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 
-    {# Brand design tokens, server-rendered from request.brand. #}
+    {% comment %}
+    Brand design tokens, server-rendered from request.brand.
+    The plain :root block guarantees these CSS variables are defined as raw
+    CSS custom properties regardless of Tailwind's JIT processing. The
+    @theme block below also makes them available as Tailwind utility classes
+    (bg-brand-primary, text-brand-accent, etc).
+    {% endcomment %}
+    <style>
+      :root {
+        --color-brand-primary: {{ request.brand.primary_color|default:"#000000" }};
+        --color-brand-accent:  {{ request.brand.accent_color|default:"#FF6B35" }};
+      }
+    </style>
     <style type="text/tailwindcss">
       @theme {
         --color-brand-primary: {{ request.brand.primary_color|default:"#000000" }};

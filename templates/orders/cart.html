@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load catalog_extras %}
 
-{% block title %}Cart \u2014 {{ request.brand.name }}{% endblock %}
+{% block title %}Cart — {{ request.brand.name }}{% endblock %}
 
 {% block meta_description %}Your cart at {{ request.brand.name }}.{% endblock %}
 
@@ -29,9 +29,11 @@
     </div>
     {% endif %}
 
-    {# The cart-contents block re-renders on HTMX swaps. Everything inside
-       _cart_contents.html (including the OOB mini-cart) is reused by the
-       update / remove / shipping-quote endpoints. #}
+    {% comment %}
+    The cart-contents block re-renders on HTMX swaps. Everything inside
+    _cart_contents.html (including the OOB mini-cart) is reused by the
+    update / remove / shipping-quote endpoints.
+    {% endcomment %}
     {% include "orders/_cart_contents.html" %}
 
 </section>

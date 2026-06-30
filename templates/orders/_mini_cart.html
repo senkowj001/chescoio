@@ -1,21 +1,27 @@
-{# ---------------------------------------------------------------------------
-   Mini cart \u2014 header fragment.
+{% comment %}
+Mini cart — header fragment.
 
-   Rendered standalone by:
-     - GET  /cart/mini/        (initial load + cart-updated event refresh)
-     - POST /cart/add/         (response after Add to Cart from product_detail)
+Rendered standalone by:
+  - GET  /cart/mini/        (initial load + cart-updated event refresh)
+  - POST /cart/add/         (response after Add to Cart from product_detail)
 
-   Also OOB-swapped by /cart/items/<pk>/update and /cart/items/<pk>/remove
-   so the header count stays in sync with cart-page mutations.
+Also OOB-swapped by /cart/items/<pk>/update and /cart/items/<pk>/remove
+so the header count stays in sync with cart-page mutations.
 
-   The wrapping <a id="mini-cart"> is what gets replaced via hx-swap="outerHTML".
-   --------------------------------------------------------------------------- #}
+The hx-swap-oob attribute is only emitted when the include sets
+`as_oob=True` — otherwise the same `<a id="mini-cart">` element is used
+as a normal primary swap target (or in the initial page render from
+header.html). Without this guard, cart_add's response would carry both
+OOB and primary-target instructions for the same element, which HTMX
+resolves by stripping the OOB content from the primary swap, leaving
+the swap target with empty content.
+{% endcomment %}
 {% load catalog_extras %}
 <a id="mini-cart"
    href="{% url 'orders:cart_page' %}"
    class="relative inline-flex items-center gap-2 text-sm text-neutral-700 hover:text-neutral-900 transition-colors"
    aria-label="Cart"
-   hx-swap-oob="true">
+   {% if as_oob %}hx-swap-oob="true"{% endif %}>
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
          fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
          stroke-linejoin="round" aria-hidden="true">
@@ -28,7 +34,7 @@
     {% if count %}
     <span class="ml-0.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5
                  text-xs font-medium rounded-full text-white"
-          style="background-color: var(--color-brand-primary);">
+          style="background-color: var(--color-brand-primary, #1a4d2e);">
         {{ count }}
     </span>
     {% endif %}

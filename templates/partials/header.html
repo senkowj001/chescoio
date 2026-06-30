@@ -1,4 +1,6 @@
-{# Minimal header for Sprint 1 \u2014 fleshed out in Sprint 5 with full nav. #}
+{% comment %}
+Minimal header for Sprint 1 — fleshed out in Sprint 5 with full nav.
+{% endcomment %}
 {% load catalog_extras %}
 <header class="border-b border-neutral-200/70">
     <div class="mx-auto max-w-6xl px-5 sm:px-8 h-16 flex items-center justify-between">
@@ -11,8 +13,10 @@
                class="text-neutral-700 hover:text-neutral-900 transition-colors">
                 Shop
             </a>
-            {# Mini-cart \u2014 swapped out by HTMX on cart add / update / remove.
-               The element id="mini-cart" is the OOB swap target. #}
+            {% comment %}
+            Mini-cart — swapped out by HTMX on cart add / update / remove.
+            The element id="mini-cart" is the OOB swap target.
+            {% endcomment %}
             {% include "orders/_mini_cart.html" %}
         </nav>
     </div>

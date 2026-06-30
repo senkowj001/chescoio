@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Order confirmation \u2014 {{ request.brand.name }}{% endblock %}
+{% block title %}Order confirmation — {{ request.brand.name }}{% endblock %}
 
 {% block meta_description %}Your order is confirmed.{% endblock %}
 
-{# Suppress crawlers and social previews from the success page \u2014 it's a
-   transactional landing, not a shareable URL. #}
+{% comment %}
+Suppress crawlers and social previews from the success page — it's a
+transactional landing, not a shareable URL.
+{% endcomment %}
 {% block extra_head %}
 <meta name="robots" content="noindex, nofollow">
 {% endblock %}
