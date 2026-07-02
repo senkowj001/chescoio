@@ -110,6 +110,16 @@ CSRF_TRUSTED_ORIGINS = [
 
 
 # =============================================================================
+# Canonical host: force apex → www
+# =============================================================================
+
+# ForceWwwRedirectMiddleware 301-redirects requests hitting these apex
+# domains to their www subdomain. Add a domain here when you add a new
+# Brand and want www to be the canonical host for it.
+FORCE_WWW_DOMAINS = ['chesco.io']
+
+
+# =============================================================================
 # Email — Hostinger SMTP via django-mailer queue
 # =============================================================================
 

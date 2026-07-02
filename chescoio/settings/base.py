@@ -38,6 +38,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'brands.middleware.ForceWwwRedirectMiddleware',  # Apex → www canonicalization (no-op in dev)
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',  # Serve static files efficiently
     'brands.middleware.BrandMiddleware',           # Resolve request.brand from hostname
