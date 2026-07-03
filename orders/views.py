@@ -17,11 +17,13 @@ Sprint 3 ships:
 
   WEBHOOKS
     POST /webhooks/stripe/       stripe_webhook   (Sprint 3)
-    POST /webhooks/printify/     printify_webhook (Sprint 2 stub; full in Sprint 4)
+    POST /webhooks/printify/     printify_webhook (Sprint 4: HMAC verify, order + product handlers)
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import time
@@ -41,8 +43,10 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from catalog.models import Variant
-from catalog.printify_client import PrintifyError
+from brands.models import Brand
+from catalog.models import Product, Variant
+from catalog.printify_client import PrintifyClient, PrintifyError
+from catalog.services import sync_one_product
 
 from .cart_utils import get_cart_or_none, get_or_create_cart
 from .checkout_services import (
@@ -51,7 +55,9 @@ from .checkout_services import (
     create_order_from_stripe_session,
     create_stripe_checkout_session,
     quote_shipping_for_cart,
+    submit_order_to_printify,
 )
+from .emails import send_order_confirmation, send_order_shipped
 from .models import Cart, CartItem, Order, WebhookEvent
 
 logger = logging.getLogger(__name__)
@@ -78,6 +84,20 @@ CHECKOUT_SUCCESS_MAX_POLLS = 15
 # we never look at causing a 500 that Stripe would then retry.
 STRIPE_HANDLED_EVENT_TYPES = frozenset({
     'checkout.session.completed',
+})
+
+# Printify event types we actually process: four order:* events + three
+# product:* events (Sprint 4 deliverables #4 and #5). Same rationale as
+# STRIPE_HANDLED_EVENT_TYPES — everything else short-circuits to a 200
+# without a WebhookEvent row or handler dispatch.
+PRINTIFY_HANDLED_EVENT_TYPES = frozenset({
+    'order:created',
+    'order:sent-to-production',
+    'order:shipment:created',
+    'order:shipment:delivered',
+    'product:publish:started',
+    'product:publish:succeeded',
+    'product:deleted',
 })
 
 
@@ -500,23 +520,36 @@ def stripe_webhook(request):
 
 def _handle_checkout_completed(session_obj) -> None:
     """
-    Materialize an Order from the Stripe checkout.session.completed event.
+    Materialize an Order from the Stripe checkout.session.completed event,
+    send the confirmation email, and submit the order to Printify.
 
     `session_obj` is a Stripe object (post-construct_event); we call .to_dict()
     to get plain types before passing into checkout_services. v15+ of the
     stripe SDK changed StripeObject so it no longer inherits from dict, hence
     the explicit to_dict.
+
+    Confirmation email fires before Printify submission is attempted: the
+    customer paid, so they get a receipt regardless of what happens next in
+    fulfillment. Both send_order_confirmation and submit_order_to_printify
+    are internally idempotent (gated on Order timestamp/status fields), so
+    if create_order_from_stripe_session returns a pre-existing Order (the
+    dedup path), neither one double-fires.
     """
     if hasattr(session_obj, 'to_dict'):
         session_dict = session_obj.to_dict()
     else:
         session_dict = dict(session_obj)
 
-    create_order_from_stripe_session(session_dict)
+    order = create_order_from_stripe_session(session_dict)
+    if order is None:
+        return
+
+    send_order_confirmation(order)
+    submit_order_to_printify(order)
 
 
 # =============================================================================
-# Printify webhook (Sprint 2 stub; Sprint 4 wires real handlers + HMAC verify)
+# Printify webhook (Sprint 4: HMAC verification + real handler dispatch)
 # =============================================================================
 
 @csrf_exempt
@@ -525,27 +558,54 @@ def printify_webhook(request):
     """
     POST /webhooks/printify/
 
-    Sprint 2 stub: parses JSON, dedupes on (source=printify, event_id),
-    persists the payload to WebhookEvent, returns 200. No business logic
-    is applied yet \u2014 Sprint 4 adds:
-      - HMAC signature verification against settings.PRINTIFY_WEBHOOK_SECRET
-        (header: X-Pfy-Signature, format 'sha256={hexdigest}')
-      - Per-event-type handler dispatch (orders + product publish events)
-      - Calling Printify's publishing_succeeded / publishing_failed endpoint
-        after a product:publish:started event
-      - Idempotent webhook registration via a management command
+    Verifies the HMAC-SHA256 signature (header X-Pfy-Signature, format
+    'sha256={hexdigest}'), dedupes against WebhookEvent (source=printify),
+    and dispatches to a per-event-type handler.
+
+    Returns 200 on success and on already-processed / ignored events; 403 on
+    signature failure; 500 on processing failure (Printify will redeliver).
     """
+    raw_body = request.body
+    signature_header = request.META.get('HTTP_X_PFY_SIGNATURE', '')
+
+    secret = settings.PRINTIFY_WEBHOOK_SECRET
+    if not secret:
+        logger.error('Printify webhook received but PRINTIFY_WEBHOOK_SECRET is empty.')
+        return HttpResponse(status=500)
+
+    expected_signature = 'sha256=' + hmac.new(
+        secret.encode(), raw_body, hashlib.sha256,
+    ).hexdigest()
+    # hmac.compare_digest is timing-safe; a plain == leaks timing info that
+    # can be used to forge a signature byte-by-byte.
+    if not hmac.compare_digest(signature_header, expected_signature):
+        logger.warning(
+            'Printify webhook: signature verification failed (header=%r)',
+            signature_header[:20],
+        )
+        return HttpResponse(status=403)
+
     try:
-        payload = json.loads(request.body or b'{}')
+        payload = json.loads(raw_body or b'{}')
     except json.JSONDecodeError:
-        logger.warning('Printify webhook: invalid JSON body (len=%d)', len(request.body or b''))
+        logger.warning('Printify webhook: invalid JSON body (len=%d)', len(raw_body or b''))
         return HttpResponseBadRequest('Invalid JSON')
 
     raw_id = payload.get('id')
     event_id = str(raw_id) if raw_id is not None else f'no-id-{timezone.now().timestamp()}'
     event_type = str(payload.get('type', ''))[:100]
 
-    obj, created = WebhookEvent.objects.get_or_create(
+    # Skip events we don't process. No audit row, no handler dispatch --
+    # mirrors the Stripe webhook's noise filter.
+    if event_type not in PRINTIFY_HANDLED_EVENT_TYPES:
+        logger.debug(
+            'Printify webhook: ignoring event_type=%s id=%s',
+            event_type, event_id,
+        )
+        return HttpResponse(status=200)
+
+    # Idempotency -- same record-and-decide pattern as the Stripe webhook.
+    record, created = WebhookEvent.objects.get_or_create(
         source=WebhookEvent.SOURCE_PRINTIFY,
         event_id=event_id,
         defaults={
@@ -553,10 +613,197 @@ def printify_webhook(request):
             'payload': payload,
         },
     )
+    if not created:
+        if record.processed_at is not None:
+            logger.info('Printify webhook duplicate (already processed): %s', event_id)
+            return HttpResponse(status=200)
+        logger.info('Printify webhook re-processing previously failed event: %s', event_id)
 
-    if created:
-        logger.info('Printify webhook recorded: type=%s id=%s', event_type, event_id)
-    else:
-        logger.info('Printify webhook duplicate ignored: type=%s id=%s', event_type, event_id)
+    resource = payload.get('resource') or {}
 
+    try:
+        handler = _PRINTIFY_EVENT_HANDLERS.get(event_type)
+        if handler:
+            handler(resource)
+        else:
+            logger.info('Printify webhook: no handler for type=%s id=%s', event_type, event_id)
+    except Exception as e:  # noqa: BLE001 -- log and 500 so Printify retries
+        logger.exception('Printify webhook handler failed: %s', e)
+        record.error = str(e)[:5000]
+        record.save(update_fields=['error'])
+        return HttpResponse(status=500)
+
+    record.processed_at = timezone.now()
+    record.error = ''
+    record.save(update_fields=['processed_at', 'error'])
     return HttpResponse(status=200)
+
+
+# -----------------------------------------------------------------------------
+# Printify event handlers
+#
+# Each takes the `resource` dict from the webhook payload
+# (payload['resource']). Order handlers look up the local Order by
+# printify_order_id; product handlers look up the local Brand by
+# printify_shop_id. Both soft-skip (log + return) rather than raise when the
+# lookup misses, since raising would 500 the webhook and trigger a Printify
+# retry storm for something that isn't a transient failure.
+# -----------------------------------------------------------------------------
+
+def _handle_printify_order_created(resource: dict) -> None:
+    """
+    Logging only. We already have printify_order_id from the synchronous
+    create_order() response in submit_order_to_printify -- this webhook is
+    just Printify's own confirmation of receipt.
+    """
+    logger.info('Printify order:created resource id=%s', resource.get('id'))
+
+
+def _handle_printify_order_in_production(resource: dict) -> None:
+    printify_order_id = str(resource.get('id') or '')
+    order = Order.objects.filter(printify_order_id=printify_order_id).first()
+    if order is None:
+        logger.warning(
+            'order:sent-to-production for unknown printify_order_id=%s', printify_order_id,
+        )
+        return
+    order.status = Order.STATUS_IN_PRODUCTION
+    order.save(update_fields=['status', 'updated_at'])
+    logger.info('Order #%d -> in_production', order.pk)
+    # No customer email by default -- noisy per Sprint 4 default (confirmed
+    # in prompt_sprint_4.md "when to ask, when to act").
+
+
+def _handle_printify_order_shipped(resource: dict) -> None:
+    printify_order_id = str(resource.get('id') or '')
+    order = Order.objects.filter(printify_order_id=printify_order_id).first()
+    if order is None:
+        logger.warning(
+            'order:shipment:created for unknown printify_order_id=%s', printify_order_id,
+        )
+        return
+
+    # Printify's shipment payload shape isn't nailed down until we see a real
+    # delivery, so this is deliberately defensive: try a `shipments` list
+    # first (Printify's documented shape for multi-package orders), then fall
+    # back to tracking fields directly on the resource.
+    shipments = resource.get('shipments') or []
+    if shipments:
+        first_shipment = shipments[0]
+        tracking_number = first_shipment.get('number') or ''
+        tracking_url = first_shipment.get('url') or ''
+        carrier = first_shipment.get('carrier') or ''
+    else:
+        tracking_number = resource.get('tracking_number') or resource.get('number') or ''
+        tracking_url = resource.get('tracking_url') or resource.get('url') or ''
+        carrier = resource.get('carrier') or ''
+
+    order.status = Order.STATUS_SHIPPED
+    order.shipped_at = timezone.now()
+    order.tracking_number = tracking_number
+    order.tracking_url = tracking_url
+    order.tracking_carrier = carrier
+    order.save(update_fields=[
+        'status', 'shipped_at', 'tracking_number', 'tracking_url',
+        'tracking_carrier', 'updated_at',
+    ])
+    logger.info(
+        'Order #%d -> shipped (carrier=%s tracking=%s)',
+        order.pk, carrier, tracking_number,
+    )
+    send_order_shipped(order)
+
+
+def _handle_printify_order_delivered(resource: dict) -> None:
+    printify_order_id = str(resource.get('id') or '')
+    order = Order.objects.filter(printify_order_id=printify_order_id).first()
+    if order is None:
+        logger.warning(
+            'order:shipment:delivered for unknown printify_order_id=%s', printify_order_id,
+        )
+        return
+    order.status = Order.STATUS_DELIVERED
+    order.delivered_at = timezone.now()
+    order.save(update_fields=['status', 'delivered_at', 'updated_at'])
+    logger.info('Order #%d -> delivered', order.pk)
+    # No customer email by default -- noisy per Sprint 4 default.
+
+
+def _handle_printify_product_publish_started(resource: dict) -> None:
+    """
+    Fetch the product from Printify, sync it locally (reusing Sprint 3's
+    sync_one_product), then call publishing_succeeded / publishing_failed so
+    Printify unlocks the product card in their UI.
+
+    Synchronous by design -- the webhook acknowledges only after the sync +
+    callback completes. For a single product that's 2-3 Printify API calls
+    plus a DB transaction, well under Printify's webhook timeout.
+    """
+    shop_id = str(resource.get('shop_id') or '')
+    product_id = str(resource.get('id') or '')
+
+    brand = Brand.objects.filter(printify_shop_id=shop_id).first()
+    if brand is None:
+        # Shouldn't happen if webhook registration is per-brand, but a stray
+        # or misconfigured subscription pointing at a shop we don't own
+        # shouldn't 500 the webhook.
+        logger.warning(
+            'product:publish:started for unmapped shop_id=%s product_id=%s '
+            '(no Brand has this printify_shop_id).',
+            shop_id, product_id,
+        )
+        return
+
+    client = PrintifyClient()
+    try:
+        product_data = client.get_product(shop_id, product_id)
+        sync_one_product(brand, product_data)
+        client.publishing_succeeded(shop_id, product_id)
+    except Exception as exc:
+        logger.exception(
+            'product:publish:started sync failed for shop=%s product=%s',
+            shop_id, product_id,
+        )
+        try:
+            client.publishing_failed(shop_id, product_id, reason=str(exc)[:200])
+        except Exception:
+            logger.exception(
+                'Also failed to call publishing_failed for shop=%s product=%s',
+                shop_id, product_id,
+            )
+        raise  # let the outer handler log + record.error + return 500
+
+    logger.info(
+        'product:publish:started: synced + published product_id=%s for brand=%s',
+        product_id, brand.domain,
+    )
+
+
+def _handle_printify_product_publish_succeeded(resource: dict) -> None:
+    """Logging only -- our sync already ran in product:publish:started."""
+    logger.info('product:publish:succeeded resource id=%s', resource.get('id'))
+
+
+def _handle_printify_product_deleted(resource: dict) -> None:
+    shop_id = str(resource.get('shop_id') or '')
+    product_id = str(resource.get('id') or '')
+    updated = Product.objects.filter(
+        brand__printify_shop_id=shop_id,
+        printify_product_id=product_id,
+    ).update(is_published=False)
+    logger.info(
+        'product:deleted shop=%s product=%s -> is_published=False (%d row(s))',
+        shop_id, product_id, updated,
+    )
+
+
+_PRINTIFY_EVENT_HANDLERS = {
+    'order:created': _handle_printify_order_created,
+    'order:sent-to-production': _handle_printify_order_in_production,
+    'order:shipment:created': _handle_printify_order_shipped,
+    'order:shipment:delivered': _handle_printify_order_delivered,
+    'product:publish:started': _handle_printify_product_publish_started,
+    'product:publish:succeeded': _handle_printify_product_publish_succeeded,
+    'product:deleted': _handle_printify_product_deleted,
+}
+

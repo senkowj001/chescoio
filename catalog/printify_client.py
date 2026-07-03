@@ -112,6 +112,10 @@ class PrintifyClient:
                 )
 
             logger.debug('Printify %s %s OK (%dms)', method, path, elapsed_ms)
+            # DELETE and some POST callbacks (webhooks, publishing_succeeded)
+            # return 204/empty bodies. resp.json() would raise on those.
+            if resp.status_code == 204 or not resp.content:
+                return None
             return resp.json()
 
         # Out of retries
@@ -182,3 +186,58 @@ class PrintifyClient:
     def get_order(self, shop_id: str, order_id: str) -> dict:
         """GET /shops/{shop_id}/orders/{order_id}.json — order detail incl. status."""
         return self._request('GET', f'/shops/{shop_id}/orders/{order_id}.json')
+
+    # ------------------------------------------------------------------
+    # Publishing callbacks (Sprint 4)
+    #
+    # After product:publish:started fires, Printify locks the product card
+    # in their UI until we call one of these. publishing_succeeded unlocks
+    # it; publishing_failed unlocks it and surfaces `reason` to the merchant.
+    # ------------------------------------------------------------------
+
+    def publishing_succeeded(self, shop_id: str, product_id: str) -> Any:
+        """POST /shops/{shop_id}/products/{product_id}/publishing_succeeded.json"""
+        return self._request(
+            'POST',
+            f'/shops/{shop_id}/products/{product_id}/publishing_succeeded.json',
+            json={},
+        )
+
+    def publishing_failed(self, shop_id: str, product_id: str, reason: str) -> Any:
+        """POST /shops/{shop_id}/products/{product_id}/publishing_failed.json"""
+        return self._request(
+            'POST',
+            f'/shops/{shop_id}/products/{product_id}/publishing_failed.json',
+            json={'reason': reason},
+        )
+
+    # ------------------------------------------------------------------
+    # Webhooks (Sprint 4)
+    #
+    # Printify has no dashboard UI for webhook subscriptions — registration
+    # is API-only. Used by the register_printify_webhooks management command.
+    # ------------------------------------------------------------------
+
+    def list_webhooks(self, shop_id: str) -> Any:
+        """GET /shops/{shop_id}/webhooks.json — every webhook subscription on this shop."""
+        return self._request('GET', f'/shops/{shop_id}/webhooks.json')
+
+    def create_webhook(self, shop_id: str, topic: str, url: str, secret: str) -> Any:
+        """POST /shops/{shop_id}/webhooks.json — subscribe to a topic."""
+        return self._request(
+            'POST',
+            f'/shops/{shop_id}/webhooks.json',
+            json={'topic': topic, 'url': url, 'secret': secret},
+        )
+
+    def update_webhook(self, shop_id: str, webhook_id: str, *, url: str, secret: str) -> Any:
+        """PUT /shops/{shop_id}/webhooks/{webhook_id}.json — repoint an existing subscription."""
+        return self._request(
+            'PUT',
+            f'/shops/{shop_id}/webhooks/{webhook_id}.json',
+            json={'url': url, 'secret': secret},
+        )
+
+    def delete_webhook(self, shop_id: str, webhook_id: str) -> Any:
+        """DELETE /shops/{shop_id}/webhooks/{webhook_id}.json"""
+        return self._request('DELETE', f'/shops/{shop_id}/webhooks/{webhook_id}.json')

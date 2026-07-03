@@ -223,6 +223,15 @@ class Order(models.Model):
     # Submission failure detail
     submission_error = models.TextField(blank=True)
 
+    # Email dedupe guards (Sprint 4) — belt-and-suspenders against a
+    # customer-facing email going out twice. WebhookEvent's (source, event_id)
+    # uniqueness is the primary defense against reprocessing a duplicate
+    # delivery; these timestamps are the secondary guard, checked at the
+    # point of sending in orders/emails.py so even a manual re-trigger or a
+    # race in webhook processing can't double-send.
+    confirmation_sent_at = models.DateTimeField(null=True, blank=True)
+    shipped_email_sent_at = models.DateTimeField(null=True, blank=True)
+
     # Audit
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

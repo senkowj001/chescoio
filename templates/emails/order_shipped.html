@@ -1,0 +1,88 @@
+{% load catalog_extras %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your order has shipped</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f5f5f4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#1c1c1c;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f5f5f4; padding:24px 0;">
+<tr>
+<td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:8px; overflow:hidden; max-width:600px; width:100%;">
+
+<tr>
+<td style="background-color:{{ brand.primary_color|default:'#1a4d2e' }}; padding:28px 32px;">
+  <span style="color:#ffffff; font-size:20px; font-weight:600; letter-spacing:0.02em;">{{ brand.name }}</span>
+</td>
+</tr>
+
+<tr>
+<td style="padding:32px;">
+  <p style="font-size:12px; text-transform:uppercase; letter-spacing:0.15em; color:#78716c; margin:0 0 8px;">Order #{{ order.id }}</p>
+  <h1 style="font-size:26px; margin:0 0 16px; color:#1c1c1c;">It's on its way, {{ order.first_name }}.</h1>
+
+  {% if order.tracking_number %}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{{ brand.accent_color|default:'#f4a261' }}22; border-radius:6px; margin-bottom:24px;">
+    <tr>
+      <td style="padding:16px 20px;">
+        <p style="margin:0 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:#78716c;">Tracking</p>
+        <p style="margin:0; font-size:15px; color:#1c1c1c;">
+          {{ order.tracking_carrier|default:"Carrier" }} &middot; {{ order.tracking_number }}
+        </p>
+        {% if order.tracking_url %}
+        <p style="margin:12px 0 0;">
+          <a href="{{ order.tracking_url }}" style="display:inline-block; padding:10px 18px; border-radius:6px; background-color:{{ brand.primary_color|default:'#1a4d2e' }}; color:#ffffff; text-decoration:none; font-size:14px; font-weight:600;">
+            Track your package
+          </a>
+        </p>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  {% else %}
+  <p style="font-size:15px; line-height:1.6; color:#44403c; margin:0 0 24px;">
+    Your order has shipped. Tracking details will follow if the carrier
+    provides them.
+  </p>
+  {% endif %}
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e7e5e4; border-bottom:1px solid #e7e5e4; margin-bottom:24px;">
+    {% for item in order.items.all %}
+    <tr>
+      <td style="padding:12px 0; border-bottom:1px solid #f4f4f3; font-size:14px; color:#1c1c1c;">
+        {{ item.quantity }}&times; {{ item.product_title }}<br>
+        <span style="color:#78716c; font-size:13px;">{{ item.variant_title }}</span>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <p style="font-size:12px; text-transform:uppercase; letter-spacing:0.15em; color:#78716c; margin:0 0 8px;">Shipping to</p>
+  <p style="font-size:14px; line-height:1.6; color:#44403c; margin:0 0 28px;">
+    {{ order.customer_name }}<br>
+    {{ order.shipping_address_line_1 }}<br>
+    {% if order.shipping_address_line_2 %}{{ order.shipping_address_line_2 }}<br>{% endif %}
+    {{ order.shipping_city }}, {{ order.shipping_state }} {{ order.shipping_postal_code }}<br>
+    {{ order.shipping_country }}
+  </p>
+
+  <p style="font-size:14px; line-height:1.6; color:#44403c; margin:0;">
+    Questions? Reply to this email or reach us at
+    <a href="mailto:{{ brand.support_email }}" style="color:{{ brand.primary_color|default:'#1a4d2e' }};">{{ brand.support_email }}</a>.
+  </p>
+</td>
+</tr>
+
+<tr>
+<td style="padding:20px 32px; background-color:#fafaf9; font-size:12px; color:#a8a29e; text-align:center;">
+  {{ brand.name }} &middot; <a href="https://{{ brand.domain }}/" style="color:#a8a29e;">{{ brand.domain }}</a>
+</td>
+</tr>
+
+</table>
+</td>
+</tr>
+</table>
+</body>
+</html>

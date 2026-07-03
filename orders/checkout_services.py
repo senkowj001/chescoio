@@ -12,7 +12,7 @@ Sprint 3 scope:
   - create_order_from_stripe_session: from a completed Stripe session, create
     the local Order + OrderItems with snapshotted prices
 
-Sprint 4 will add:
+Sprint 4 adds:
   - submit_order_to_printify (Order \u2192 Printify Orders API)
 """
 
@@ -25,6 +25,7 @@ import stripe
 from django.conf import settings
 from django.db import transaction
 from django.urls import reverse
+from django.utils import timezone
 
 from brands.models import Brand
 from catalog.printify_client import PrintifyClient, PrintifyError
@@ -398,3 +399,101 @@ def create_order_from_stripe_session(session: dict) -> Optional[Order]:
         order.pk, stripe_session_id, brand.domain, order.total_cents,
     )
     return order
+
+
+# =============================================================================
+# Printify order submission (Sprint 4)
+# =============================================================================
+
+def submit_order_to_printify(order: Order, *, force: bool = False) -> None:
+    """
+    Submit a paid Order to Printify for fulfillment.
+
+    Idempotent by default: no-ops unless order.status == Order.STATUS_PAID.
+    This guards against _handle_checkout_completed somehow running twice for
+    the same order (e.g. a WebhookEvent row created but never marked
+    processed_at, so a Stripe retry re-enters the handler). Pass force=True
+    to bypass the guard — used by the admin "Retry Printify submission"
+    action, which only ever targets orders already in submission_failed.
+
+    On success: stores printify_order_id, sets status=submitted, submitted_at,
+    and clears any prior submission_error.
+
+    On failure: sets status=submission_failed, records submission_error, and
+    queues an admin alert email (see orders/emails.py::send_admin_order_failed).
+    Does not raise. The Stripe webhook handler that calls this has already
+    committed the paid Order — the customer's payment succeeded regardless
+    of what Printify does next, so a Printify hiccup is an operational
+    problem to flag, not a reason to 500 the webhook and trigger a Stripe
+    retry storm.
+    """
+    if not force and order.status != Order.STATUS_PAID:
+        logger.info(
+            'submit_order_to_printify: order #%d has status=%s (not %s); skipping.',
+            order.pk, order.status, Order.STATUS_PAID,
+        )
+        return
+
+    if not order.brand.printify_shop_id:
+        logger.error(
+            'submit_order_to_printify: brand %s has no printify_shop_id; cannot submit order #%d.',
+            order.brand.domain, order.pk,
+        )
+        _mark_submission_failed(order, 'Brand has no printify_shop_id configured.')
+        return
+
+    client = PrintifyClient()
+    payload = {
+        'external_id': str(order.id),
+        'label': f'chesco-{order.id}',
+        'line_items': [
+            {
+                'product_id': item.variant.product.printify_product_id,
+                'variant_id': item.variant.printify_variant_id,
+                'quantity': item.quantity,
+            }
+            for item in order.items.all()
+        ],
+        'shipping_method': order.shipping_method_code,
+        'send_shipping_notification': False,  # we send our own via django-mailer
+        'address_to': {
+            'first_name': order.first_name,
+            'last_name': order.last_name or order.first_name,
+            'email': order.email,
+            'phone': order.phone or '',
+            'country': order.shipping_country,
+            'region': order.shipping_state,
+            'address1': order.shipping_address_line_1,
+            'address2': order.shipping_address_line_2 or '',
+            'city': order.shipping_city,
+            'zip': order.shipping_postal_code,
+        },
+    }
+
+    try:
+        resp = client.create_order(order.brand.printify_shop_id, payload)
+    except PrintifyError as e:
+        logger.exception('Printify order submission failed for order #%d', order.pk)
+        _mark_submission_failed(order, str(e))
+        return
+
+    order.printify_order_id = str(resp.get('id', '')) if resp else ''
+    order.status = Order.STATUS_SUBMITTED
+    order.submitted_at = timezone.now()
+    order.submission_error = ''
+    order.save(update_fields=[
+        'printify_order_id', 'status', 'submitted_at', 'submission_error', 'updated_at',
+    ])
+    logger.info(
+        'Order #%d submitted to Printify: printify_order_id=%s',
+        order.pk, order.printify_order_id,
+    )
+
+
+def _mark_submission_failed(order: Order, error_message: str) -> None:
+    order.status = Order.STATUS_SUBMISSION_FAILED
+    order.submission_error = error_message[:5000]
+    order.save(update_fields=['status', 'submission_error', 'updated_at'])
+
+    from .emails import send_admin_order_failed  # local import avoids a module import cycle
+    send_admin_order_failed(order, error_message)

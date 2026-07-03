@@ -1,0 +1,33 @@
+{% load catalog_extras %}{{ brand.name }} — Order Confirmation
+================================================================
+
+Hi {{ order.first_name }},
+
+Thanks for your order! We've received your payment and your order is on
+its way to production.
+
+ORDER #{{ order.id }}
+----------------------------------------------------------------
+{% for item in order.items.all %}
+{{ item.quantity }}x {{ item.product_title }} ({{ item.variant_title }}) — {{ item.line_total_cents|cents }}
+{% endfor %}
+Subtotal: {{ order.subtotal_cents|cents }}
+Shipping: {{ order.shipping_cents|cents }}
+Tax:      {{ order.tax_cents|cents }}
+Total:    {{ order.total_cents|cents }}
+
+SHIPPING TO
+----------------------------------------------------------------
+{{ order.customer_name }}
+{{ order.shipping_address_line_1 }}
+{% if order.shipping_address_line_2 %}{{ order.shipping_address_line_2 }}
+{% endif %}{{ order.shipping_city }}, {{ order.shipping_state }} {{ order.shipping_postal_code }}
+{{ order.shipping_country }}
+
+We'll email you again with tracking information as soon as your order
+ships.
+
+Questions? Reply to this email or reach us at {{ brand.support_email }}.
+
+— The {{ brand.name }} team
+https://{{ brand.domain }}/

@@ -1,0 +1,33 @@
+{% load catalog_extras %}{{ brand.name }} — Your order has shipped!
+================================================================
+
+Hi {{ order.first_name }},
+
+Good news — order #{{ order.id }} is on its way.
+{% if order.tracking_number %}
+
+TRACKING
+----------------------------------------------------------------
+Carrier:  {{ order.tracking_carrier|default:"—" }}
+Tracking: {{ order.tracking_number }}
+{% if order.tracking_url %}Track it: {{ order.tracking_url }}
+{% endif %}{% endif %}
+
+ORDER #{{ order.id }}
+----------------------------------------------------------------
+{% for item in order.items.all %}
+{{ item.quantity }}x {{ item.product_title }} ({{ item.variant_title }})
+{% endfor %}
+
+SHIPPING TO
+----------------------------------------------------------------
+{{ order.customer_name }}
+{{ order.shipping_address_line_1 }}
+{% if order.shipping_address_line_2 %}{{ order.shipping_address_line_2 }}
+{% endif %}{{ order.shipping_city }}, {{ order.shipping_state }} {{ order.shipping_postal_code }}
+{{ order.shipping_country }}
+
+Questions? Reply to this email or reach us at {{ brand.support_email }}.
+
+— The {{ brand.name }} team
+https://{{ brand.domain }}/

@@ -1,0 +1,29 @@
+[ACTION REQUIRED] Printify submission failed
+================================================================
+
+Brand:      {{ brand.name }} ({{ brand.domain }})
+Order:      #{{ order.id }}
+Customer:   {{ order.customer_name }} <{{ order.email }}>
+Total:      {{ order.total_cents }} cents
+Status:     {{ order.status }}
+Created:    {{ order.created_at }}
+
+ERROR
+----------------------------------------------------------------
+{{ error }}
+
+SHIPPING ADDRESS ON FILE
+----------------------------------------------------------------
+{{ order.shipping_address_line_1 }}
+{% if order.shipping_address_line_2 %}{{ order.shipping_address_line_2 }}
+{% endif %}{{ order.shipping_city }}, {{ order.shipping_state }} {{ order.shipping_postal_code }}
+{{ order.shipping_country }}
+
+The customer has already paid via Stripe. This order will NOT be
+fulfilled until it is resubmitted to Printify. Common causes: an invalid
+shipping address, an out-of-stock variant, or a Printify API outage.
+
+Fix the underlying issue (e.g. correct the address in Django admin), then
+use the "Retry Printify submission" action on this order in:
+
+  https://{{ brand.domain }}/admin/orders/order/{{ order.id }}/change/
