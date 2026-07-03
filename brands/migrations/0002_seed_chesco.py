@@ -27,6 +27,13 @@ SEED_DEFAULTS = {
     'from_email': 'hello@chesco.io',
     'support_email': 'hello@chesco.io',
     'is_active': True,
+
+    # Operational values — not secrets, safe to commit. Shop IDs identify
+    # which Printify shop this brand pulls products from; discoverable to
+    # anyone with the Printify PAT (which is a real secret). Baking the
+    # shop ID here means a fresh `manage.py migrate` on a new environment
+    # gets a fully-functional brand record with no post-migrate admin step.
+    'printify_shop_id': '16351967',
 }
 
 

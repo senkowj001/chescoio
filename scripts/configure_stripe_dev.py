@@ -179,65 +179,84 @@ else:
 
 banner("3. Default product tax code (preset PTC)")
 
+# Optional CLI override — pass --force-code=txcd_XXXXXXX to change the
+# currently-set default. Useful when the initial dynamic pick turns out to
+# be a specialty subcategory (e.g. athletic apparel, which PA still taxes)
+# instead of the plain "General - Clothing" code we want for chesco.io.
+force_code = None
+for arg in sys.argv[1:]:
+    if arg.startswith("--force-code="):
+        force_code = arg.split("=", 1)[1].strip()
+
 existing_defaults = get_attr_or_key(settings, "defaults")
 existing_default_code = get_attr_or_key(existing_defaults, "tax_code")
 existing_default_behavior = get_attr_or_key(existing_defaults, "tax_behavior")
 
-if existing_default_code:
-    print(f"  Default tax_code already set: {existing_default_code}")
-    print(f"  Default tax_behavior      : {existing_default_behavior or '(not set)'}")
-    print("  Leaving as-is. To change, edit in dashboard or delete and re-run.")
+print(f"  Current default tax_code : {existing_default_code or '(not set)'}")
+print(f"  Current default behavior : {existing_default_behavior or '(not set)'}")
+
+# Always list clothing-adjacent candidates for diagnostic value — even when
+# a default is already set, seeing the full menu of options makes it obvious
+# whether we picked the right one and, if not, what to switch to.
+print()
+print("  Clothing-category codes available in Stripe's catalog:")
+clothing_candidates = []
+try:
+    for tc in stripe.TaxCode.list(limit=100).auto_paging_iter():
+        name = (tc.name or "").lower()
+        description = (tc.description or "").lower()
+        if (
+            "clothing" in name
+            or "apparel" in name
+            or "footwear" in name
+            or ("clothing" in description and "general" in name)
+        ):
+            clothing_candidates.append(tc)
+except stripe.error.StripeError as e:
+    bail(f"Could not list tax codes: {e}")
+
+if not clothing_candidates:
+    bail(
+        "No clothing-category tax codes found in Stripe's catalog. This\n"
+        "is unexpected; Stripe Tax should always have a 'General Clothing'\n"
+        "or similar code available."
+    )
+
+clothing_candidates.sort(key=lambda t: (len(t.name or ""), t.name or ""))
+for tc in clothing_candidates[:20]:
+    marker = "  * " if tc.id == existing_default_code else "    "
+    print(f"{marker}{tc.id}  {tc.name}")
+if len(clothing_candidates) > 20:
+    print(f"     ... and {len(clothing_candidates) - 20} more")
+print()
+print("  (* = currently set as default)")
+
+# Decide what to do:
+#   - If --force-code was passed: unconditionally set that code as default
+#   - Elif no default is set: pick the shortest-named clothing candidate
+#   - Else: leave existing default alone (idempotent re-run)
+target_code = None
+if force_code:
+    target_code = force_code
+    print(f"\n  --force-code={force_code} — will overwrite current default.")
+elif not existing_default_code:
+    target_code = clothing_candidates[0].id
+    print(f"\n  No default currently set; will use {target_code}.")
 else:
-    # Discover a clothing-category tax code by listing the catalog. Stripe has
-    # 400+ codes, but the clothing-adjacent ones are few and easy to filter by
-    # name. We prefer the most general clothing code (shortest name match)
-    # so chesco.io's t-shirts / hoodies / etc. all fall under one default.
-    # PA's clothing exemption fires automatically for codes in this category.
-    print("  Searching Stripe tax code catalog for clothing-category codes...")
-    clothing_candidates = []
-    try:
-        for tc in stripe.TaxCode.list(limit=100).auto_paging_iter():
-            name = (tc.name or "").lower()
-            description = (tc.description or "").lower()
-            if (
-                "clothing" in name
-                or "apparel" in name
-                or ("clothing" in description and "general" in name)
-            ):
-                clothing_candidates.append(tc)
-    except stripe.error.StripeError as e:
-        bail(f"Could not list tax codes: {e}")
+    print("\n  Default already set; leaving as-is.")
+    print("  To change, re-run with --force-code=txcd_XXXXXXX.")
 
-    if not clothing_candidates:
-        bail(
-            "No clothing-category tax codes found in Stripe's catalog. This\n"
-            "is unexpected; Stripe Tax should always have a 'General Clothing'\n"
-            "or similar code available. Investigate via the dashboard or\n"
-            "`stripe.TaxCode.list()` interactively."
-        )
-
-    # Prefer the most generic match: shortest name, then alphabetical.
-    clothing_candidates.sort(key=lambda t: (len(t.name or ""), t.name or ""))
-    chosen = clothing_candidates[0]
-
-    print(f"  Found {len(clothing_candidates)} clothing-category code(s):")
-    for tc in clothing_candidates[:8]:
-        marker = "  -> " if tc.id == chosen.id else "     "
-        print(f"{marker}{tc.id}  {tc.name}")
-    if len(clothing_candidates) > 8:
-        print(f"     ... and {len(clothing_candidates) - 8} more")
-
-    print()
-    print(f"  Setting defaults: tax_code={chosen.id}, tax_behavior=exclusive")
+if target_code:
     try:
         settings = stripe.tax.Settings.modify(
             defaults={
-                "tax_code": chosen.id,
+                "tax_code": target_code,
                 "tax_behavior": "exclusive",
             }
         )
     except stripe.error.StripeError as e:
         bail(f"Could not set default tax code: {e}")
+    print(f"  Set defaults.tax_code={target_code}, defaults.tax_behavior=exclusive")
     print(f"  Tax settings status: {settings.status}")
 
 
