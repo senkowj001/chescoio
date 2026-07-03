@@ -50,9 +50,17 @@ if HEROKU_APP_NAME:
 # Database — Heroku Postgres
 # =============================================================================
 
+# conn_max_age=60 (down from the Django default of 600) trades a small
+# per-request reconnect cost for eliminating the class of stale-connection
+# 500s we hit on 2026-07-03. On a low-traffic pre-launch site, a persistent
+# connection can sit idle long enough for Heroku Postgres's proxy to reap
+# it silently; the next request then times out on a dead socket. At 60s
+# TTL, idle intervals rarely span the full lifetime, and Django's
+# CONN_HEALTH_CHECKS below detects dead connections before use anyway.
+# Revisit if traffic ever justifies chasing the reconnect overhead.
 DATABASES = {
     'default': dj_database_url.config(
-        conn_max_age=600,
+        conn_max_age=60,
         ssl_require=True,
     )
 }
