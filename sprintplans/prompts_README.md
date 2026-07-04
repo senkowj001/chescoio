@@ -1,6 +1,6 @@
 # East Goshen Apparel — Sprint Prompts Index
 
-This folder contains five sprint implementation prompts plus the master sprint plan. Each prompt is designed to be self-contained: hand the prompt file plus `eg_apparel_sprint_plan.md` to a focused Claude session and it should have everything needed to execute that sprint.
+This folder contains six sprint implementation prompts plus the master sprint plan. Each prompt is designed to be self-contained: hand the prompt file plus `eg_apparel_sprint_plan.md` to a focused Claude session and it should have everything needed to execute that sprint.
 
 ## Files
 
@@ -10,6 +10,7 @@ This folder contains five sprint implementation prompts plus the master sprint p
 - `prompt_sprint_3.md` — Cart & Stripe Checkout
 - `prompt_sprint_4.md` — Printify order submission & status sync
 - `prompt_sprint_5.md` — Polish, legal, SEO & launch
+- `prompt_sprint_6.md` — Launch recovery & production cutover (fixes the failed release, removes "Coming Soon," surfaces the contact page, Stripe live cutover, email deliverability, publishes legal pages)
 
 ## How to use these prompts
 
