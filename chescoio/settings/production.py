@@ -67,10 +67,17 @@ DATABASES = {
 
 DATABASES['default']['CONN_HEALTH_CHECKS'] = True
 
-# psycopg2 connection-level timeouts (mirrors HuntScrape).
+# psycopg2 connection-level timeouts. Mirrors HuntScrape, except
+# connect_timeout is tightened to 10s (from HuntScrape's 15s): the
+# release-phase `migrate` connects once and is watched interactively, so a
+# hung connect should surface as a clean OperationalError fast rather than
+# sitting near the release timeout (this is the 2026-07-04 release failure
+# we are hardening against). A healthy Heroku Postgres connect is
+# sub-second, so 10s only ever bites when the DB is genuinely unreachable.
+# keepalives + statement_timeout guard long-lived / runaway connections.
 DATABASES['default'].setdefault('OPTIONS', {})
 DATABASES['default']['OPTIONS'].update({
-    'connect_timeout': 15,
+    'connect_timeout': 10,
     'keepalives': 1,
     'keepalives_idle': 30,
     'keepalives_interval': 10,

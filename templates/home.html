@@ -1,14 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}{{ request.brand.name }} — Coming Soon{% endblock %}
+{% block title %}{{ request.brand.name }} — {{ request.brand.tagline }}{% endblock %}
 
 {% block content %}
 <section class="flex-1 flex items-center justify-center px-6 py-20">
     <div class="max-w-2xl text-center">
-
-        <p class="text-xs uppercase tracking-[0.2em] text-neutral-500 mb-6">
-            Coming Soon
-        </p>
 
         {% comment %}
         Heading: the brand wordmark, in the brand primary color (navy).
@@ -45,7 +41,7 @@
 
         {# Accent hairline — uses the brand accent color #}
         <div class="mt-12 mx-auto h-px w-16"
-             style="background-color: var(--color-brand-accent, #f4a261);"></div>
+             style="background-color: var(--color-brand-accent, #0a6ed3);"></div>
 
     </div>
 </section>

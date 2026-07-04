@@ -1031,6 +1031,45 @@ Documented at the end of Sprint 5 so the plan stays the source of truth for the 
 
 ---
 
+# Sprint 6 — Launch Recovery & Production Cutover — delivery notes
+
+Documented following the Sprints 1–5 convention. **As in Sprints 4 and 5, this was a Claude session working only against the Windows filesystem via the `filesystem:*` MCP — no bash, no network, no `manage.py`, and no Heroku / Stripe / Printify / DNS calls were (or could be) made in-session.** The code/doc surface of this sprint is deliberately small; the substance is operational and is John's to execute. **Every acceptance-criteria item and the entire launch checklist stay UNCHECKED until John runs and verifies them live.** This section records (a) the deploy root-cause, (b) the small code/doc changes made this session, and (c) the operational follow-up John must run, in order.
+
+## Deploy root-cause (why release v29 didn't go live)
+
+- **Not a code bug.** Heroku's release phase runs `python manage.py migrate`; that migrate died in `ensure_connection()` at the *initial connect* to Heroku Postgres with `psycopg2.OperationalError: ... timeout expired` (RDS host `c4fqkld51su0p3…us-east-1`, port 5432). Heroku holds a release back until its release command succeeds, so the failed release (v29) rolled back and Heroku kept serving the previous, pre-Sprint-5 build. That — not any template — is why the live wordmark was still green, buttons still green, "Coming Soon" still present, and `/contact/` still 404.
+- **Button code was already correct; left untouched.** `templates/home.html`'s CTA renders `var(--color-brand-accent, #0a6ed3)` and `brands/0003_recolor_chesco.py` sets the brand's `accent_color = #0a6ed3` (and `primary_color = #000052`). Once the code is live and the migration applied, buttons are blue with zero template change. Verified on disk that all four pending migrations exist: `core.0001_initial`, `core.0002_seed_static_pages`, `orders.0004_order_lookup_token_and_refunds`, `brands.0003_recolor_chesco`.
+- The failure is DB reachability from the release dyno — operational, not code. The fix is John retrying `heroku run python manage.py migrate` (most likely a transient blip) and, if it recurs, diagnosing via `heroku pg:info` / `heroku pg:diagnose` / `status.heroku.com` / confirming `DATABASE_URL`.
+
+## Code / doc changes made this session (Claude, via MCP)
+
+- **`chescoio/settings/production.py` — DB connect hardening (minor).** The hardening the prompt asked for was *already substantially present*: this file already had `conn_max_age=60`, `CONN_HEALTH_CHECKS=True`, keepalives, and `statement_timeout=25000`. Confirmed all still in place. The one change: tightened `connect_timeout` from 15s to **10s** with a comment explaining why — the release-phase migrate connects once and is watched interactively, so a hung connect should surface as a clean `OperationalError` fast rather than sitting near the release timeout; a healthy Heroku Postgres connect is sub-second, so 10s only bites when the DB is genuinely unreachable (the exact failure mode here). Intentional, documented divergence from HuntScrape's 15s. **Direct note: this does not fix the deploy** — it only makes the next failure (if any) surface a few seconds faster. The deploy fix is operational (above).
+- **`templates/home.html` — removed "Coming Soon".** Title block changed from `… — Coming Soon` to `… — {{ request.brand.tagline }}`. Removed the `Coming Soon` kicker `<p>` entirely (the tagline already renders prominently below the wordmark, so a kicker would duplicate it). Normalized the accent-hairline fallback from stale amber `#f4a261` to `#0a6ed3` (cosmetic; the DB var already drives it blue at runtime). **Copy caveat:** deleting the kicker is a default choice, not John's approved copy — the prompt flags homepage kicker/headline copy as an "ask John first" item. If John wants a kicker (e.g. a location line like "Chester County, PA" or a seasonal "New for 2026"), it's a one-line add; otherwise the clean no-kicker hero stands.
+- **`templates/partials/header.html` — added a "Contact" nav link.** `{% url 'core:contact' %}` beside "Shop", so the (already-built) contact page is reachable from every page's header, not just the footer. Verified `core/urls.py` exposes `app_name='core'` + `name='contact'`, so the reverse is correct and won't `NoReverseMatch`. Did not rebuild the contact page — it already ships with Sprint 5.
+- **`.python-version` created** at the project root containing exactly `3.12` (major-only, no `python-` prefix, no patch), to replace the deprecated pinned `runtime.txt` (`python-3.12.8`). **John must `git rm runtime.txt`** — the filesystem MCP has no delete tool, so Claude could create `.python-version` but not remove `runtime.txt`; having both present is ambiguous.
+- **Did NOT touch button colors** (already correct — see root-cause) and did NOT write the optional `Brand.plausible_domain` / `Brand.meta_pixel_id` data migration (setting those two fields in admin is simpler than a migration and is listed as a John step — offered, not assumed).
+
+## Incidental observation
+
+- There is a stray, junk-looking file named `python` at the project root (alongside the `runtime.txt` being retired). It looks like an accidental artifact (e.g. a botched shell redirect), is not referenced by the build, and should be `git rm`'d after John confirms it's junk. Not touched this session.
+
+## Operational follow-up — John runs all of these, in order (this IS the sprint)
+
+The prompt's workstreams A→G are authoritative; condensed here so the plan stays the single source of truth:
+
+1. **Unblock the deploy (Workstream A — blocks everything):** `heroku run python manage.py migrate`. If it succeeds, the code (v29) is still not live — re-trigger a release: `git commit --allow-empty -m "Re-trigger release" && git push heroku main`. If it times out again, diagnose (`heroku pg:info` / `pg:diagnose` / `status.heroku.com` / `DATABASE_URL`; consider Essential-0 → Essential-1 for headroom). Then verify live: navy wordmark, **blue** buttons, `/contact/` resolves, `/privacy/` 404s until published, `/robots.txt` + `/sitemap.xml` return, and `showmigrations` shows `core`, `orders.0004`, `brands.0003` applied.
+2. **Ship this session's front-end changes** with the same push (Coming Soon removal, header Contact link, `.python-version`); `git rm runtime.txt` (and the stray `python` file).
+3. **Transactional email (launch blocker):** confirm a real provider behind `MAILER_EMAIL_BACKEND` with creds in Heroku config; set SPF/DKIM/DMARC at Hostinger for `chesco.io`; wire the drain jobs (step 5); verify mail-tester ≥ 9/10 with a real order-confirmation and a real contact submission landing in the inbox.
+4. **Products:** `heroku run python manage.py sync_printify_products --brand=chesco.io`; ensure products are published in Printify; verify list/detail/variants/images/size-guide render; `heroku run python manage.py register_printify_webhooks --brand=chesco.io` (endpoint `https://www.chesco.io/webhooks/printify/`).
+5. **Heroku Scheduler jobs** (`heroku addons:open scheduler`): `sync_printify_products --brand=chesco.io` hourly; `send_mail` every 10 min; `retry_deferred` hourly; `clear_old_carts` daily.
+6. **Stripe live cutover (core gate):** activate the account; configure Stripe Tax in **LIVE** with default tax code **`txcd_30011000` (Clothing & Footwear)** and confirm PA clothing computes **$0.00** in a live tax preview (do NOT let a heuristic pick `txcd_30011201 Fur Clothing` — the Sprint 3 trap); set `sk_live_…`/`pk_live_…` in Heroku; register the LIVE webhook `https://www.chesco.io/webhooks/stripe/` on **both `checkout.session.completed` and `charge.refunded`** with the live signing secret; confirm Printify billing; place one real personal order end-to-end; issue a real (try partial) refund and confirm `charge.refunded` populates `refunded_cents`/`refunded_at` and flips status to `refunded` only on a full refund.
+7. **Analytics / SEO / legal:** create a Plausible site + Meta Pixel, set `Brand.plausible_domain` / `Brand.meta_pixel_id`, verify all four events fire (incl. `Purchase` value + Meta dedup `eventID`); review and publish the four draft legal pages (**do not launch without returns and privacy approved**) and uncheck `needs_review`; set `Brand.logo_url` to a real 1200×630 OG image + confirm a favicon; fetch `/robots.txt` + `/sitemap.xml` and submit the sitemap to Search Console.
+8. **Hygiene:** rotate the test-mode Stripe keys + Printify PAT pasted into chat during earlier sprints (update `.env` + Heroku); delete the Sprint 3 test Order #1 artifact if still in prod; confirm `heroku pg:backups:capture` runs clean and a backup schedule is set.
+9. **Soft launch, then announce** — your order, then 2–3 trusted buyers, fix what surfaces, then public. Not on a Friday. 2.0 (photography, Etsy, abandoned cart, B2B intake, second brand) stays deferred.
+10. **`makemigrations --check`** (expect "no changes"), then commit and push to GitHub `main`.
+
+---
+
 # Post-launch / 2.0 list
 
 Things deliberately deferred from v1, documented here so they don't get forgotten:
