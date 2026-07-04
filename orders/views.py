@@ -41,7 +41,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from brands.models import Brand
 from catalog.models import Product, Variant
@@ -82,8 +82,11 @@ CHECKOUT_SUCCESS_MAX_POLLS = 15
 # about). Returning 200 early for everything else keeps WebhookEvent free of
 # noise and avoids any chance of a serialization edge case on a payload shape
 # we never look at causing a 500 that Stripe would then retry.
+# Sprint 5 adds charge.refunded so a dashboard-issued refund reflects onto the
+# local Order (refunded_cents / refunded_at; a full refund flips status).
 STRIPE_HANDLED_EVENT_TYPES = frozenset({
     'checkout.session.completed',
+    'charge.refunded',
 })
 
 # Printify event types we actually process: four order:* events + three
@@ -437,6 +440,63 @@ def checkout_success(request):
 
 
 # =============================================================================
+# Public order lookup + status (Sprint 5)
+# =============================================================================
+
+@require_http_methods(['GET', 'POST'])
+def order_lookup(request):
+    """
+    GET/POST /orders/lookup/ — find an order by number + email.
+
+    On a successful match, redirect to the tokenized public status page. The
+    lookup_token in the status URL is the capability; the (order number +
+    email) pair here is just the lookup key, matched case-insensitively on
+    email so we don't leak whether an order number exists to someone who
+    doesn't also know the email on it.
+    """
+    brand = _require_brand(request)
+
+    if request.method == 'GET':
+        return render(request, 'orders/order_lookup.html', {})
+
+    raw_order_number = (request.POST.get('order_number') or '').strip().lstrip('#')
+    email = (request.POST.get('email') or '').strip()
+
+    order = None
+    if raw_order_number.isdigit() and email:
+        order = (
+            Order.objects
+            .filter(pk=int(raw_order_number), brand=brand, email__iexact=email)
+            .first()
+        )
+
+    if order is None:
+        return render(request, 'orders/order_lookup.html', {
+            'error': 'We couldn’t find an order with that number and email. '
+                     'Double-check both and try again.',
+            'values': {'order_number': raw_order_number, 'email': email},
+        }, status=404)
+
+    return redirect('orders:order_status', lookup_token=order.lookup_token)
+
+
+@require_GET
+def order_status(request, lookup_token):
+    """
+    GET /orders/status/<lookup_token>/ — public order status page.
+
+    The unguessable token is the capability, so no login is required. 404 if
+    the token doesn't match an order for this brand. The template sets
+    noindex so these transactional URLs stay out of search results.
+    """
+    brand = _require_brand(request)
+    order = Order.objects.filter(lookup_token=lookup_token, brand=brand).first()
+    if order is None:
+        raise Http404('No such order.')
+    return render(request, 'orders/order_status.html', {'order': order})
+
+
+# =============================================================================
 # Stripe webhook
 # =============================================================================
 
@@ -504,6 +564,8 @@ def stripe_webhook(request):
     try:
         if event_type == 'checkout.session.completed':
             _handle_checkout_completed(event['data']['object'])
+        elif event_type == 'charge.refunded':
+            _handle_charge_refunded(event['data']['object'])
         else:
             logger.info('Stripe webhook: no handler for type=%s id=%s', event_type, event_id)
     except Exception as e:  # noqa: BLE001 \u2014 we want to log and 500 so Stripe retries
@@ -546,6 +608,56 @@ def _handle_checkout_completed(session_obj) -> None:
 
     send_order_confirmation(order)
     submit_order_to_printify(order)
+
+
+def _handle_charge_refunded(charge_obj) -> None:
+    """
+    Reflect a Stripe refund onto the local Order (Sprint 5).
+
+    Fired by the charge.refunded webhook. Matches the Order by
+    stripe_payment_intent_id (the charge carries the payment_intent), records
+    the cumulative amount Stripe reports refunded, and flips status to
+    'refunded' only on a FULL refund — a partial refund records the amount but
+    leaves the fulfillment status intact.
+
+    Soft-skips (logs + returns) if no local Order matches the charge's
+    payment_intent — e.g. a refund on a charge from some other integration
+    sharing this Stripe account. Printify refunds are handled separately (a
+    support ticket); see the admin note and Sprint 5 delivery notes.
+    """
+    if hasattr(charge_obj, 'to_dict'):
+        charge = charge_obj.to_dict()
+    else:
+        charge = dict(charge_obj)
+
+    payment_intent_id = charge.get('payment_intent') or ''
+    if not payment_intent_id:
+        logger.warning('charge.refunded with no payment_intent; cannot match an Order.')
+        return
+
+    order = Order.objects.filter(stripe_payment_intent_id=payment_intent_id).first()
+    if order is None:
+        logger.warning(
+            'charge.refunded for payment_intent=%s matched no local Order; skipping.',
+            payment_intent_id,
+        )
+        return
+
+    amount_refunded = int(charge.get('amount_refunded') or 0)
+    fully_refunded = bool(charge.get('refunded'))
+
+    order.refunded_cents = amount_refunded
+    order.refunded_at = timezone.now()
+    update_fields = ['refunded_cents', 'refunded_at', 'updated_at']
+    if fully_refunded:
+        order.status = Order.STATUS_REFUNDED
+        update_fields.append('status')
+    order.save(update_fields=update_fields)
+
+    logger.info(
+        'Order #%d refunded (amount_refunded=%d cents, full=%s)',
+        order.pk, amount_refunded, fully_refunded,
+    )
 
 
 # =============================================================================

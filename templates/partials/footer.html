@@ -1,12 +1,47 @@
-{# Minimal footer for Sprint 1 — gets a sitemap, social links, etc. in Sprint 5. #}
+{% comment %}
+Site footer. Nav links + email signup + copyright.
+
+Legal/marketing page links (about, size-guide, shipping, returns, privacy,
+terms) are rendered only when that StaticPage is published, via the
+published_page_slugs tag — so the footer never links to an unpublished legal
+draft (which would 404). Shop / Track order / Contact are always shown since
+they're views, not StaticPages. about + size-guide are seeded published, so
+they appear by default.
+{% endcomment %}
+{% load core_extras %}
+{% published_page_slugs as live_pages %}
 <footer class="mt-auto border-t border-neutral-200/70">
-    <div class="mx-auto max-w-6xl px-5 sm:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-neutral-600">
-        <p>&copy; {% now "Y" %} {{ request.brand.name }}. All rights reserved.</p>
-        {% if request.brand.support_email %}
-        <a href="mailto:{{ request.brand.support_email }}"
-           class="hover:text-neutral-900 transition-colors">
-            {{ request.brand.support_email }}
-        </a>
-        {% endif %}
+    <div class="mx-auto max-w-6xl px-5 sm:px-8 py-10">
+
+        <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-8">
+
+            <nav class="flex flex-wrap gap-x-6 gap-y-2 text-sm text-neutral-600">
+                <a href="{% url 'catalog:product_list' %}" class="hover:text-neutral-900 transition-colors">Shop</a>
+                {% if 'about' in live_pages %}<a href="{% url 'core:about' %}" class="hover:text-neutral-900 transition-colors">About</a>{% endif %}
+                {% if 'size-guide' in live_pages %}<a href="{% url 'core:size_guide' %}" class="hover:text-neutral-900 transition-colors">Size guide</a>{% endif %}
+                {% if 'shipping' in live_pages %}<a href="{% url 'core:shipping' %}" class="hover:text-neutral-900 transition-colors">Shipping</a>{% endif %}
+                {% if 'returns' in live_pages %}<a href="{% url 'core:returns' %}" class="hover:text-neutral-900 transition-colors">Returns</a>{% endif %}
+                {% if 'privacy' in live_pages %}<a href="{% url 'core:privacy' %}" class="hover:text-neutral-900 transition-colors">Privacy</a>{% endif %}
+                {% if 'terms' in live_pages %}<a href="{% url 'core:terms' %}" class="hover:text-neutral-900 transition-colors">Terms</a>{% endif %}
+                <a href="{% url 'orders:order_lookup' %}" class="hover:text-neutral-900 transition-colors">Track order</a>
+                <a href="{% url 'core:contact' %}" class="hover:text-neutral-900 transition-colors">Contact</a>
+            </nav>
+
+            {# Email signup — HTMX swaps this wrapper's contents in place. #}
+            <div id="signup-wrap" class="shrink-0">
+                {% include "core/_email_signup_form.html" %}
+            </div>
+        </div>
+
+        <div class="mt-8 pt-6 border-t border-neutral-200/70 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-neutral-500">
+            <p>&copy; {% now "Y" %} {{ request.brand.name }}. All rights reserved.</p>
+            {% if request.brand.support_email %}
+            <a href="mailto:{{ request.brand.support_email }}"
+               class="hover:text-neutral-900 transition-colors">
+                {{ request.brand.support_email }}
+            </a>
+            {% endif %}
+        </div>
+
     </div>
 </footer>

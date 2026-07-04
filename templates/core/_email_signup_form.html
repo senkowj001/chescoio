@@ -1,0 +1,43 @@
+{% comment %}
+Footer email-signup form. Posted via HTMX (hx-post to core:email_signup),
+swapping the inner content of #signup-wrap — so on success the form becomes a
+thank-you, and on a bad email it re-renders itself with `signup_error` set.
+A method/action pair mirrors the hx-post so the form still works if JS/HTMX
+never loads (the view redirects back with a message for non-HTMX posts).
+
+Honeypot: the hidden "company" field is left empty by real browsers; bots
+that fill everything trip it server-side.
+{% endcomment %}
+<form method="post" action="{% url 'core:email_signup' %}"
+      hx-post="{% url 'core:email_signup' %}"
+      hx-target="#signup-wrap"
+      hx-swap="innerHTML"
+      class="w-full sm:w-auto"
+      autocomplete="on">
+    {% csrf_token %}
+    <input type="hidden" name="source" value="footer">
+
+    {# Honeypot — visually hidden, not display:none. #}
+    <div aria-hidden="true" style="position:absolute; left:-9999px; top:auto; height:0; overflow:hidden;">
+        <label for="signup-company">Company (leave blank)</label>
+        <input type="text" id="signup-company" name="company" tabindex="-1" autocomplete="off">
+    </div>
+
+    <label for="signup-email" class="block text-xs uppercase tracking-wider text-neutral-500 mb-1.5">
+        New releases, in your inbox
+    </label>
+    <div class="flex gap-2">
+        <input type="email" id="signup-email" name="email" required
+               placeholder="you@example.com"
+               class="flex-1 sm:w-56 px-3 py-2 border border-neutral-300 rounded-md bg-white text-sm
+                      focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900">
+        <button type="submit"
+                class="px-4 py-2 text-sm font-medium rounded-md text-white transition-opacity hover:opacity-90 whitespace-nowrap"
+                style="background-color: var(--color-brand-accent, #0a6ed3);">
+            Sign up
+        </button>
+    </div>
+    {% if signup_error %}
+    <p class="mt-1.5 text-xs text-red-600">{{ signup_error }}</p>
+    {% endif %}
+</form>

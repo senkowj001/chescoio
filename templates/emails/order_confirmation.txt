@@ -27,6 +27,9 @@ SHIPPING TO
 We'll email you again with tracking information as soon as your order
 ships.
 
+Track your order anytime:
+https://{{ brand.domain }}{% url 'orders:order_status' lookup_token=order.lookup_token %}
+
 Questions? Reply to this email or reach us at {{ brand.support_email }}.
 
 — The {{ brand.name }} team

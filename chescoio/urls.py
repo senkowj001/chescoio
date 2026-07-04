@@ -8,6 +8,13 @@ request.brand by the time any view runs.
 from django.contrib import admin
 from django.urls import include, path
 
+# Branded error handlers (Sprint 5). Django imports these by dotted path.
+# page_not_found handles a 404 within a valid brand (the unknown-hostname 404
+# is served by BrandMiddleware -> brands/not_found.html); server_error renders
+# a self-contained 500 that doesn't depend on context processors.
+handler404 = 'core.views.page_not_found'
+handler500 = 'core.views.server_error'
+
 urlpatterns = [
     path('admin/', admin.site.urls),
 

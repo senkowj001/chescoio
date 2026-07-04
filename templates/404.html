@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Page not found — {{ request.brand.name }}{% endblock %}
+{% block meta_description %}The page you were looking for couldn’t be found.{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block content %}
+<section class="flex-1 flex items-center justify-center px-6 py-20">
+    <div class="max-w-lg text-center">
+        <p class="text-xs uppercase tracking-[0.2em] text-neutral-500 mb-4">Error 404</p>
+        <h1 class="text-4xl sm:text-5xl font-semibold tracking-tight leading-tight text-neutral-900">
+            We can’t find that page.
+        </h1>
+        <p class="mt-5 text-neutral-600 leading-relaxed">
+            The link may be broken or the page may have moved. Let’s get you
+            back to something that exists.
+        </p>
+        <div class="mt-8 flex flex-wrap justify-center gap-3">
+            <a href="{% url 'catalog:product_list' %}"
+               class="inline-block px-6 py-3 rounded-md font-medium text-white transition-opacity hover:opacity-90"
+               style="background-color: var(--color-brand-accent, #0a6ed3);">
+                Shop the collection
+            </a>
+            <a href="/"
+               class="inline-block px-6 py-3 rounded-md font-medium text-neutral-800 border border-neutral-300 hover:bg-neutral-50 transition-colors">
+                Go home
+            </a>
+        </div>
+    </div>
+</section>
+{% endblock %}

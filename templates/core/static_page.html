@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% load core_extras %}
+
+{% block title %}{{ page.title }} — {{ request.brand.name }}{% endblock %}
+
+{% block meta_description %}{% if page.meta_description %}{{ page.meta_description }}{% else %}{{ page.title }} — {{ request.brand.name }}.{% endif %}{% endblock %}
+
+{% block og_title %}{{ page.title }} — {{ request.brand.name }}{% endblock %}
+{% block og_description %}{% if page.meta_description %}{{ page.meta_description }}{% else %}{{ page.title }}{% endif %}{% endblock %}
+
+{% comment %}
+Draft pages (is_published=False) are only reachable here by staff; a plain
+noindex keeps an accidentally-shared preview URL out of search while John is
+reviewing copy. Published pages omit this and index normally.
+{% endcomment %}
+{% if is_draft_preview %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% endif %}
+
+{% block content %}
+<section class="mx-auto max-w-3xl px-5 sm:px-8 py-10 sm:py-14 w-full">
+
+    {% if is_draft_preview %}
+    <div class="mb-8 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <strong>Draft preview.</strong> This page is unpublished — only staff can see it.
+        Review the copy, then publish it from the admin when it’s approved.
+    </div>
+    {% endif %}
+
+    <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight leading-tight"
+        style="color: var(--color-brand-primary, #1a4d2e);">
+        {{ page.title }}
+    </h1>
+
+    {% comment %}
+    Rendered markdown. The Tailwind Typography plugin isn't loaded (browser
+    CDN build), so this scoped block supplies the spacing/typography the
+    prose needs — headings, paragraphs, lists, links, and the size-guide
+    tables. Class is namespaced (.page-prose) so it can't leak elsewhere.
+    {% endcomment %}
+    <style>
+      .page-prose { color: #44403c; line-height: 1.7; margin-top: 1.75rem; }
+      .page-prose h2 { color: #1c1c1c; font-size: 1.375rem; font-weight: 600;
+                       margin: 2rem 0 0.75rem; letter-spacing: -0.01em; }
+      .page-prose h3 { color: #1c1c1c; font-size: 1.125rem; font-weight: 600;
+                       margin: 1.5rem 0 0.5rem; }
+      .page-prose p { margin: 0 0 1rem; }
+      .page-prose ul, .page-prose ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+      .page-prose ul { list-style: disc; }
+      .page-prose ol { list-style: decimal; }
+      .page-prose li { margin: 0.25rem 0; }
+      .page-prose li > p { margin: 0.25rem 0; }
+      .page-prose a { color: var(--color-brand-primary, #1a4d2e); text-decoration: underline; }
+      .page-prose a:hover { opacity: 0.8; }
+      .page-prose strong { color: #1c1c1c; font-weight: 600; }
+      .page-prose hr { border: 0; border-top: 1px solid #e7e5e4; margin: 2rem 0; }
+      .page-prose table { width: 100%; border-collapse: collapse; margin: 0 0 1.5rem;
+                          font-size: 0.925rem; }
+      .page-prose th, .page-prose td { border: 1px solid #e7e5e4; padding: 0.5rem 0.75rem;
+                          text-align: left; }
+      .page-prose th { background: #fafaf9; font-weight: 600; color: #1c1c1c; }
+      .page-prose blockquote { border-left: 3px solid var(--color-brand-accent, #f4a261);
+                          padding-left: 1rem; margin: 0 0 1rem; color: #57534e; }
+    </style>
+    <div class="page-prose">
+        {{ page.content|markdownify }}
+    </div>
+
+</section>
+{% endblock %}

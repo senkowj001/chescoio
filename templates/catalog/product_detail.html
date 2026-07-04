@@ -6,7 +6,12 @@
 {% block meta_description %}{{ product.title }} from {{ request.brand.name }}.{% endblock %}
 
 {% block og_title %}{{ product.title }} — {{ request.brand.name }}{% endblock %}
-{% block og_image %}{% if default_image %}{{ default_image.url }}{% else %}{{ request.brand.logo_url }}{% endif %}{% endblock %}
+{% block og_description %}{{ product.title }} from {{ request.brand.name }}. {{ request.brand.tagline }}{% endblock %}
+{% block og_type %}<meta property="og:type" content="product">{% endblock %}
+{% block og_image %}{% if default_image %}<meta property="og:image" content="{{ default_image.url }}">{% elif request.brand.logo_url %}<meta property="og:image" content="{{ request.brand.logo_url }}">{% endif %}{% endblock %}
+{% block twitter_title %}<meta name="twitter:title" content="{{ product.title }}">{% endblock %}
+{% block twitter_description %}<meta name="twitter:description" content="{{ product.title }} from {{ request.brand.name }}.">{% endblock %}
+{% block twitter_image %}{% if default_image %}<meta name="twitter:image" content="{{ default_image.url }}">{% elif request.brand.logo_url %}<meta name="twitter:image" content="{{ request.brand.logo_url }}">{% endif %}{% endblock %}
 
 {% block content %}
 <section class="mx-auto max-w-6xl px-5 sm:px-8 py-10 sm:py-14 w-full">
@@ -113,12 +118,14 @@
 
             {# ----- Add to cart button ----- #}
             <style>
-              /* Inline styles win over Tailwind utilities, so the brand-color
+              /* Inline styles win over Tailwind utilities, so the button color
                  base + neutral disabled state are easiest to express in raw CSS.
-                 Fallback hex values guard against the unlikely case of
-                 var(--color-brand-primary) failing to resolve. */
+                 The resting button uses the brand accent (action) color; the
+                 flash below uses the primary color so the "Added" pulse reads as
+                 a distinct change. Fallback hex values guard against the var
+                 failing to resolve. */
               #add-to-cart-btn {
-                background-color: var(--color-brand-primary, #1a4d2e);
+                background-color: var(--color-brand-accent, #0a6ed3);
                 color: #fff;
               }
               #add-to-cart-btn:not(:disabled):hover { opacity: 0.9; }
@@ -128,7 +135,7 @@
                 cursor: not-allowed;
                 opacity: 1;
               }
-              #add-to-cart-btn.is-flashing { background-color: var(--color-brand-accent, #f4a261); }
+              #add-to-cart-btn.is-flashing { background-color: var(--color-brand-primary, #000052); }
             </style>
             <div class="mt-6">
                 <button type="button"
@@ -170,6 +177,11 @@
 {{ variants_data|json_script:"variants-data" }}
 <script>
 (function () {
+    // Analytics: fire a product-view event on load (Meta Pixel + Plausible),
+    // each guarded so it no-ops when the brand hasn't configured that channel.
+    if (window.fbq) fbq('track', 'ViewContent', {content_name: "{{ product.title|escapejs }}", content_type: 'product'});
+    if (window.plausible) plausible('ViewContent');
+
     const dataEl = document.getElementById('variants-data');
     if (!dataEl) return;
 
@@ -289,6 +301,9 @@
     cartBtn.addEventListener('htmx:afterRequest', (evt) => {
         const ok = evt.detail && evt.detail.successful;
         if (ok) {
+            // Analytics: successful add-to-cart (Meta Pixel + Plausible).
+            if (window.fbq) fbq('track', 'AddToCart');
+            if (window.plausible) plausible('AddToCart');
             cartBtn.classList.add('is-flashing');
             cartBtn.textContent = 'Added \u2713';
             if (feedbackEl) feedbackEl.textContent = 'Item added to your cart.';

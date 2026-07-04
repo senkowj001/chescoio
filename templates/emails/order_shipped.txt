@@ -27,6 +27,9 @@ SHIPPING TO
 {% endif %}{{ order.shipping_city }}, {{ order.shipping_state }} {{ order.shipping_postal_code }}
 {{ order.shipping_country }}
 
+View your order status anytime:
+https://{{ brand.domain }}{% url 'orders:order_status' lookup_token=order.lookup_token %}
+
 Questions? Reply to this email or reach us at {{ brand.support_email }}.
 
 — The {{ brand.name }} team

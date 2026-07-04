@@ -12,6 +12,7 @@ activity related to the order.
 """
 
 from django.contrib import admin, messages
+from django.urls import reverse
 from django.utils.html import format_html
 
 from .models import Cart, CartItem, Order, OrderItem, WebhookEvent
@@ -160,12 +161,16 @@ class OrderAdmin(admin.ModelAdmin):
     )
     readonly_fields = (
         'brand',
+        'lookup_token',
+        'lookup_link',
         'stripe_session_id',
         'stripe_payment_intent_id',
         'subtotal_cents',
         'shipping_cents',
         'tax_cents',
         'total_cents',
+        'refunded_cents',
+        'refunded_at',
         'created_at',
         'updated_at',
         'confirmation_sent_at',
@@ -174,7 +179,7 @@ class OrderAdmin(admin.ModelAdmin):
     )
     fieldsets = (
         ('Order', {
-            'fields': ('brand', 'status', 'created_at', 'updated_at'),
+            'fields': ('brand', 'status', 'lookup_token', 'lookup_link', 'created_at', 'updated_at'),
         }),
         ('Customer', {
             'fields': ('email', 'first_name', 'last_name', 'phone'),
@@ -196,6 +201,17 @@ class OrderAdmin(admin.ModelAdmin):
         }),
         ('Stripe', {
             'fields': ('stripe_session_id', 'stripe_payment_intent_id'),
+        }),
+        ('Refunds (Sprint 5)', {
+            'fields': ('refunded_cents', 'refunded_at'),
+            'description': (
+                'Populated by the Stripe charge.refunded webhook. A full refund '
+                'also flips status to “refunded”; a partial refund records the '
+                'amount only. Refunds are issued in the Stripe dashboard — this '
+                'panel is read-only. Printify does NOT auto-refund: to recover '
+                'fulfillment cost on a refunded order, open a Printify support '
+                'ticket separately.'
+            ),
         }),
         ('Printify (Sprint 4)', {
             'fields': (
@@ -235,6 +251,15 @@ class OrderAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # Orders are created by the Stripe webhook, not by hand.
         return False
+
+    def lookup_link(self, obj):
+        """Clickable link to the customer-facing public order-status page."""
+        if not obj.pk or not obj.lookup_token:
+            return format_html('&mdash;')
+        path = reverse('orders:order_status', kwargs={'lookup_token': obj.lookup_token})
+        url = f'https://{obj.brand.domain}{path}'
+        return format_html('<a href="{}" target="_blank" rel="noopener">{}</a>', url, url)
+    lookup_link.short_description = 'Public status page'
 
     def recent_webhook_events(self, obj):
         """

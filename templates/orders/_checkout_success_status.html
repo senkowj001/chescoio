@@ -25,6 +25,18 @@ server-side. Client-side state would be lost across the HTMX outerHTML swap.
      {% endif %}>
 
     {% if order %}
+        {% comment %}
+        Analytics: fire Purchase once, when the order is confirmed on this page
+        (Meta Pixel + Plausible, each guarded on brand config). The eventID lets
+        Meta dedupe this browser event against any server-side Purchase later.
+        HTMX executes this script when the order-present fragment is swapped in.
+        {% endcomment %}
+        {% if request.brand.meta_pixel_id or request.brand.plausible_domain %}
+        <script>
+          if (window.fbq) fbq('track', 'Purchase', {value: {{ order.total_cents }}/100.0, currency: 'USD'}, {eventID: 'purchase_{{ order.id }}'});
+          if (window.plausible) plausible('Purchase', {props: {value: {{ order.total_cents }}/100.0}});
+        </script>
+        {% endif %}
         {# Success state #}
         <div class="rounded-lg border border-neutral-200/70 bg-white p-6 sm:p-8">
             <p class="text-xs uppercase tracking-[0.2em] text-neutral-500 mb-3">
@@ -80,11 +92,15 @@ server-side. Client-side state would be lost across the HTMX outerHTML swap.
                 {% endfor %}
             </div>
 
-            <div class="mt-10">
+            <div class="mt-10 flex flex-wrap gap-3">
                 <a href="{% url 'catalog:product_list' %}"
                    class="inline-block px-6 py-3 rounded-md font-medium text-white transition-opacity hover:opacity-90"
-                   style="background-color: var(--color-brand-primary, #1a4d2e);">
+                   style="background-color: var(--color-brand-accent, #0a6ed3);">
                     Keep shopping
+                </a>
+                <a href="{% url 'orders:order_status' lookup_token=order.lookup_token %}"
+                   class="inline-block px-6 py-3 rounded-md font-medium text-neutral-800 border border-neutral-300 hover:bg-neutral-50 transition-colors">
+                    View order status
                 </a>
             </div>
         </div>
@@ -110,7 +126,7 @@ server-side. Client-side state would be lost across the HTMX outerHTML swap.
             <div class="mt-6 flex flex-wrap gap-3">
                 <a href="?session_id={{ session_id }}"
                    class="inline-block px-5 py-2.5 rounded-md font-medium text-white transition-opacity hover:opacity-90"
-                   style="background-color: var(--color-brand-primary, #1a4d2e);">
+                   style="background-color: var(--color-brand-accent, #0a6ed3);">
                     Check again
                 </a>
                 <a href="{% url 'catalog:product_list' %}"

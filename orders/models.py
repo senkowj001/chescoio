@@ -14,10 +14,25 @@ Sprint 4 will wire Order.status transitions to Printify webhook events and
 populate printify_order_id / shipped_at / delivered_at.
 """
 
+import secrets
+
 from django.db import models
 
 from brands.models import Brand
 from catalog.models import Variant
+
+
+def generate_lookup_token() -> str:
+    """
+    Return a URL-safe random token for the public order-lookup URL (Sprint 5).
+
+    secrets.token_urlsafe(24) yields ~32 chars of URL-safe base64 (192 bits of
+    entropy), so /orders/status/<token>/ can't be enumerated by walking integer
+    order IDs. Uniqueness is enforced at the DB level (Order.lookup_token is
+    unique); a collision at this entropy is astronomically unlikely, but the
+    constraint guarantees correctness regardless.
+    """
+    return secrets.token_urlsafe(24)
 
 
 # =============================================================================
@@ -182,6 +197,17 @@ class Order(models.Model):
         db_index=True,
     )
 
+    # Public, unguessable identifier for the customer-facing order-status page
+    # (Sprint 5). Used as the URL path component instead of the integer PK so
+    # /orders/status/<token>/ can't be enumerated. Auto-populated on creation
+    # via the generate_lookup_token default.
+    lookup_token = models.CharField(
+        max_length=64,
+        unique=True,
+        default=generate_lookup_token,
+        editable=False,
+    )
+
     # Contact
     email = models.EmailField(db_index=True)
     first_name = models.CharField(max_length=100)
@@ -201,6 +227,15 @@ class Order(models.Model):
     shipping_cents = models.IntegerField(default=0)
     tax_cents = models.IntegerField(default=0)
     total_cents = models.IntegerField(default=0)
+
+    # Refunds (Sprint 5) — populated by the Stripe charge.refunded webhook.
+    # refunded_cents is the cumulative amount Stripe reports refunded on the
+    # charge (partial or full). status flips to 'refunded' only on a FULL
+    # refund; a partial refund records the amount but leaves the fulfillment
+    # status intact. Printify refunds are handled separately (support ticket) —
+    # see the admin note and Sprint 5 delivery notes.
+    refunded_cents = models.IntegerField(default=0)
+    refunded_at = models.DateTimeField(null=True, blank=True)
 
     # Shipping selection — Printify wants an integer code (1 = standard, 2 = priority, etc).
     # Defaults to 1 (standard). We also keep the human-readable label.

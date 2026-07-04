@@ -8,11 +8,19 @@
     <meta name="description" content="{% block meta_description %}{{ request.brand.tagline }}{% endblock %}">
 
     {# Open Graph — fleshed out per-page in Sprint 5 #}
+    <link rel="canonical" href="https://{{ request.brand.domain }}{{ request.path }}">
+
+    <meta property="og:site_name" content="{{ request.brand.name }}">
     <meta property="og:title" content="{% block og_title %}{{ request.brand.name }}{% endblock %}">
     <meta property="og:description" content="{% block og_description %}{{ request.brand.tagline }}{% endblock %}">
-    {% if request.brand.logo_url %}<meta property="og:image" content="{{ request.brand.logo_url }}">{% endif %}
     <meta property="og:url" content="https://{{ request.brand.domain }}{{ request.path }}">
+    {% block og_type %}<meta property="og:type" content="website">{% endblock %}
+    {% block og_image %}{% if request.brand.logo_url %}<meta property="og:image" content="{{ request.brand.logo_url }}">{% endif %}{% endblock %}
+
     <meta name="twitter:card" content="summary_large_image">
+    {% block twitter_title %}<meta name="twitter:title" content="{{ request.brand.name }}">{% endblock %}
+    {% block twitter_description %}<meta name="twitter:description" content="{{ request.brand.tagline }}">{% endblock %}
+    {% block twitter_image %}{% if request.brand.logo_url %}<meta name="twitter:image" content="{{ request.brand.logo_url }}">{% endif %}{% endblock %}
 
     {# Tailwind v4 (browser CDN) — JIT-compiles classes in the browser. #}
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>

@@ -1,0 +1,13 @@
+{% comment %}
+Response fragment for the footer email signup. On success, a compact
+thank-you. On a validation failure, the form is re-rendered with an inline
+error so the visitor can correct and retry. Swapped into #signup-wrap.
+{% endcomment %}
+{% if ok %}
+<div class="text-sm text-neutral-700">
+    <p class="font-medium" style="color: var(--color-brand-primary, #1a4d2e);">You’re on the list.</p>
+    <p class="mt-1 text-neutral-600">Thanks — we’ll send a note when new designs drop.</p>
+</div>
+{% else %}
+{% include "core/_email_signup_form.html" with signup_error="That email didn’t look valid — try again." %}
+{% endif %}

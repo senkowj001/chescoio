@@ -25,6 +25,10 @@ urlpatterns = [
     path('checkout/', views.checkout_start, name='checkout_start'),
     path('checkout/success/', views.checkout_success, name='checkout_success'),
 
+    # -------- Order lookup / status (Sprint 5) --------
+    path('orders/lookup/', views.order_lookup, name='order_lookup'),
+    path('orders/status/<str:lookup_token>/', views.order_status, name='order_status'),
+
     # -------- Webhooks --------
     path('webhooks/stripe/', views.stripe_webhook, name='stripe_webhook'),
     path('webhooks/printify/', views.printify_webhook, name='printify_webhook'),

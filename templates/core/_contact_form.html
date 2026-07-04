@@ -1,0 +1,54 @@
+{% comment %}
+Contact form fragment. Posted via HTMX (hx-post to core:contact), swapping
+the inner content of #contact-form-wrap — so the form is replaced by the
+success message on success, or re-rendered with field errors on failure.
+
+`errors` is a dict keyed by field name; `values` repopulates fields after a
+failed submit. The hidden "company" field is a honeypot: real browsers leave
+it empty (it's off-screen), bots that fill everything trip it server-side.
+{% endcomment %}
+<form hx-post="{% url 'core:contact' %}"
+      hx-target="#contact-form-wrap"
+      hx-swap="innerHTML"
+      class="space-y-5"
+      autocomplete="on">
+    {% csrf_token %}
+
+    {# Honeypot — visually hidden, not display:none (some bots skip hidden fields). #}
+    <div aria-hidden="true" style="position:absolute; left:-9999px; top:auto; height:0; overflow:hidden;">
+        <label for="company">Company (leave blank)</label>
+        <input type="text" id="company" name="company" tabindex="-1" autocomplete="off">
+    </div>
+
+    <div>
+        <label for="name" class="block text-sm font-medium text-neutral-900 mb-1.5">Name</label>
+        <input type="text" id="name" name="name" required
+               value="{{ values.name|default:'' }}"
+               class="w-full px-3 py-2.5 border border-neutral-300 rounded-md bg-white
+                      focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900">
+        {% if errors.name %}<p class="mt-1 text-xs text-red-600">{{ errors.name }}</p>{% endif %}
+    </div>
+
+    <div>
+        <label for="email" class="block text-sm font-medium text-neutral-900 mb-1.5">Email</label>
+        <input type="email" id="email" name="email" required
+               value="{{ values.email|default:'' }}"
+               class="w-full px-3 py-2.5 border border-neutral-300 rounded-md bg-white
+                      focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900">
+        {% if errors.email %}<p class="mt-1 text-xs text-red-600">{{ errors.email }}</p>{% endif %}
+    </div>
+
+    <div>
+        <label for="message" class="block text-sm font-medium text-neutral-900 mb-1.5">Message</label>
+        <textarea id="message" name="message" rows="5" required
+                  class="w-full px-3 py-2.5 border border-neutral-300 rounded-md bg-white
+                         focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900">{{ values.message|default:'' }}</textarea>
+        {% if errors.message %}<p class="mt-1 text-xs text-red-600">{{ errors.message }}</p>{% endif %}
+    </div>
+
+    <button type="submit"
+            class="inline-flex items-center px-7 py-3 rounded-md font-medium text-white transition-opacity hover:opacity-90"
+            style="background-color: var(--color-brand-accent, #0a6ed3);">
+        Send message
+    </button>
+</form>
