@@ -70,7 +70,12 @@ def published_page_slugs(context):
     an empty set when there's no request/brand (e.g. an error page rendered
     without a resolved brand).
     """
-    from .models import StaticPage  # local import keeps this module import-light
+    # Absolute import: inside a templatetags package, `.models` resolves to
+    # core.templatetags.models (which does not exist) and raises
+    # ModuleNotFoundError. Import from core.models. Kept function-local so this
+    # module stays import-light at startup (and to avoid any app-registry
+    # timing issues when template tag modules load early).
+    from core.models import StaticPage
     request = context.get('request')
     brand = getattr(request, 'brand', None) if request else None
     if brand is None:
