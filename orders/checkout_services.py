@@ -251,6 +251,10 @@ def create_stripe_checkout_session(
             'cart_id': str(cart.pk),
             'shipping_method_code': str(shipping_quote['method_code']),
             'shipping_label': shipping_quote['label'],
+            # checkout_start enforces the no-return-policy checkbox before this
+            # session is created, so record the acknowledgment on the payment
+            # for dispute/chargeback evidence (visible in the Stripe dashboard).
+            'returns_policy_accepted': 'true',
         },
     )
     logger.info(

@@ -184,6 +184,30 @@ same response. The OOB fragment is rendered via _mini_cart.html.
                     <form method="post" action="{% url 'orders:checkout_start' %}" class="pt-2"
                           onsubmit="if(window.fbq){fbq('track','InitiateCheckout');}if(window.plausible){plausible('InitiateCheckout');}">
                         {% csrf_token %}
+
+                        {% comment %}
+                        Required no-return-policy acknowledgment. The `required`
+                        attribute blocks the native form submit until it's checked;
+                        checkout_start enforces it server-side too, so a crafted
+                        POST can't bypass it, and the acceptance is stamped onto the
+                        Stripe session metadata for dispute evidence. The policy
+                        link opens in a new tab so clicking it doesn't discard the
+                        cart/checkout state.
+                        NOTE: the linked returns page must be published
+                        (is_published=True) or this link 404s for the public.
+                        {% endcomment %}
+                        <label class="flex items-start gap-2 mb-3 text-xs text-neutral-600 leading-relaxed">
+                            <input type="checkbox" name="agree_returns" value="yes" required
+                                   style="accent-color: var(--color-brand-accent, #0a6ed3);"
+                                   class="mt-0.5 h-4 w-4 shrink-0">
+                            <span>
+                                I understand all sales are final and have read the
+                                <a href="{% url 'core:returns' %}" target="_blank" rel="noopener"
+                                   class="underline hover:text-neutral-900"
+                                   style="color: var(--color-brand-accent, #0a6ed3);">no return policy</a>.
+                            </span>
+                        </label>
+
                         <button type="submit"
                                 {% if not shipping_quote %}disabled{% endif %}
                                 class="w-full px-5 py-3 rounded-md font-medium text-white transition-opacity

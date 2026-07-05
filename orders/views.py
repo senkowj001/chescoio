@@ -387,6 +387,18 @@ def checkout_start(request):
         messages.warning(request, 'Please enter a ZIP code to calculate shipping before checking out.')
         return redirect('orders:cart_page')
 
+    # Require the no-return-policy acknowledgment. The cart checkbox is marked
+    # `required` (blocks the native submit in a normal browser); this is the
+    # server-side backstop so a crafted POST can't skip it. The acceptance is
+    # recorded on the Stripe session metadata (create_stripe_checkout_session)
+    # as dispute/chargeback evidence.
+    if not request.POST.get('agree_returns'):
+        messages.warning(
+            request,
+            'Please confirm you\u2019ve read the no return policy before checking out.',
+        )
+        return redirect('orders:cart_page')
+
     if not settings.STRIPE_SECRET_KEY:
         logger.error('checkout_start: STRIPE_SECRET_KEY is not configured.')
         messages.error(request, 'Checkout is temporarily unavailable. Please try again shortly.')
