@@ -253,9 +253,11 @@ def robots_txt(request):
     """
     sitemap_url = request.build_absolute_uri('/sitemap.xml')
     lines = [
+        # The admin path (/ct-ops/) is deliberately NOT listed below: robots.txt
+        # is public, and a Disallow line would advertise the admin location. The
+        # old '/admin/' entry is dropped now that admin has moved off it.
         'User-agent: *',
         'Allow: /',
-        'Disallow: /admin/',
         'Disallow: /cart/',
         'Disallow: /checkout/',
         'Disallow: /webhooks/',
