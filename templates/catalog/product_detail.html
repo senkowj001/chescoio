@@ -144,7 +144,7 @@
                         data-product-id="{{ product.pk }}"
                         data-default-label="Add to cart"
                         hx-post="{% url 'orders:cart_add' %}"
-                        hx-vals='js:{variant_id: document.getElementById("add-to-cart-btn").dataset.variantId, quantity: 1}'
+                        hx-vals='js:{variant_id: document.getElementById("add-to-cart-btn").dataset.variantId, product_id: document.getElementById("add-to-cart-btn").dataset.productId, quantity: 1}'
                         hx-target="#mini-cart"
                         hx-swap="outerHTML"
                         class="w-full sm:w-auto px-8 py-3 rounded-md font-medium transition-opacity

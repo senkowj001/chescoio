@@ -197,14 +197,30 @@ def cart_add(request):
     except ValueError:
         return HttpResponseBadRequest('variant_id must be an integer')
 
+    # Printify variant IDs are blueprint-level, not per-product: the same
+    # printify_variant_id (e.g. "M / Black" on the Unisex Heavy Cotton Tee) is
+    # shared by EVERY product built on that blueprint. So the lookup MUST be
+    # scoped to the specific product, or .get() raises MultipleObjectsReturned
+    # as soon as the brand has 2+ products on one blueprint. (product,
+    # printify_variant_id) is unique_together, so scoping by product_id makes
+    # the match exact. The add-to-cart button posts product_id (data-product-id).
+    raw_product_id = (request.POST.get('product_id') or '').strip()
+    if not raw_product_id:
+        return HttpResponseBadRequest('product_id is required')
+    try:
+        product_id = int(raw_product_id)
+    except ValueError:
+        return HttpResponseBadRequest('product_id must be an integer')
+
     try:
         quantity = max(1, int(request.POST.get('quantity', 1)))
     except (TypeError, ValueError):
         quantity = 1
 
-    # Variant must belong to this brand, be enabled and available.
+    # Variant must belong to this product AND brand, be enabled and available.
     try:
         variant = Variant.objects.select_related('product').get(
+            product_id=product_id,
             printify_variant_id=printify_variant_id,
             product__brand=brand,
             is_enabled=True,
@@ -212,8 +228,8 @@ def cart_add(request):
         )
     except Variant.DoesNotExist:
         logger.info(
-            'cart_add: variant printify_id=%s not available for brand=%s',
-            printify_variant_id, brand.domain,
+            'cart_add: variant printify_id=%s not available for product=%s brand=%s',
+            printify_variant_id, product_id, brand.domain,
         )
         return HttpResponseBadRequest('That variant is no longer available.')
 
