@@ -79,7 +79,15 @@ class Command(BaseCommand):
                 'and set it in .env / Heroku config before registering webhooks.'
             )
 
-        target_url = f'https://{brand.domain}/webhooks/printify/'
+        # Register at the canonical host. Brand.domain is the bare apex
+        # (BrandMiddleware strips www before lookup), but ForceWwwRedirectMiddleware
+        # 301-redirects apex traffic to www, and Printify won't follow a redirect
+        # on webhook delivery -- so the subscription must point at the final www
+        # host or every event 301s and is silently lost.
+        host = brand.domain
+        if brand.domain in getattr(settings, 'FORCE_WWW_DOMAINS', ()):
+            host = f'www.{brand.domain}'
+        target_url = f'https://{host}/webhooks/printify/'
 
         client = PrintifyClient()
         try:
