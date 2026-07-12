@@ -790,6 +790,19 @@ def printify_webhook(request):
 # retry storm for something that isn't a transient failure.
 # -----------------------------------------------------------------------------
 
+def _printify_shop_id(resource: dict) -> str:
+    """
+    Extract the Printify shop id from a webhook resource, coerced to str.
+
+    Printify nests shop_id under resource['data'] and sends it as an int, not
+    at the top level -- confirmed against a real product:publish:started
+    payload. Fall back to a top-level key defensively in case a topic uses a
+    flatter shape.
+    """
+    data = resource.get('data') or {}
+    return str(data.get('shop_id') or resource.get('shop_id') or '')
+
+
 def _handle_printify_order_created(resource: dict) -> None:
     """
     Logging only. We already have printify_order_id from the synchronous
@@ -827,7 +840,7 @@ def _handle_printify_order_shipped(resource: dict) -> None:
     # delivery, so this is deliberately defensive: try a `shipments` list
     # first (Printify's documented shape for multi-package orders), then fall
     # back to tracking fields directly on the resource.
-    shipments = resource.get('shipments') or []
+    shipments = resource.get('shipments') or (resource.get('data') or {}).get('shipments') or []
     if shipments:
         first_shipment = shipments[0]
         tracking_number = first_shipment.get('number') or ''
@@ -879,7 +892,7 @@ def _handle_printify_product_publish_started(resource: dict) -> None:
     callback completes. For a single product that's 2-3 Printify API calls
     plus a DB transaction, well under Printify's webhook timeout.
     """
-    shop_id = str(resource.get('shop_id') or '')
+    shop_id = _printify_shop_id(resource)
     product_id = str(resource.get('id') or '')
 
     brand = Brand.objects.filter(printify_shop_id=shop_id).first()
@@ -925,7 +938,7 @@ def _handle_printify_product_publish_succeeded(resource: dict) -> None:
 
 
 def _handle_printify_product_deleted(resource: dict) -> None:
-    shop_id = str(resource.get('shop_id') or '')
+    shop_id = _printify_shop_id(resource)
     product_id = str(resource.get('id') or '')
     updated = Product.objects.filter(
         brand__printify_shop_id=shop_id,
