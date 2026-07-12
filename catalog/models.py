@@ -1,12 +1,17 @@
 """
 Catalog models — local cache of Printify products, scoped per-Brand.
 
-Source of truth is Printify. The `sync_printify_products` management command
-upserts these rows on a nightly schedule (Heroku Scheduler) and on-demand.
+Printify is the source of truth for product *content* (title, variants, images,
+pricing). The `sync_printify_products` command / Brand "Sync Now" action upsert
+these rows on demand.
 
 Design notes:
-- Product, Variant, ProductImage are pure caches. No business logic mutates
-  them outside the sync command. Admin registers them read-only.
+- Product, Variant, ProductImage cache Printify content. Sync is the only writer
+  of that content, and the admin change forms are read-only for it.
+- EXCEPTION: `Product.is_published` is locally owned (Sprint 7). It is a
+  draft/publish flag set from ct-ops (Publish / Move-to-draft actions), NOT a
+  mirror of Printify's `visible`. Sync never overwrites it on existing rows and
+  forces it False (draft) on new imports; see catalog/services.py.
 - Product.slug is scoped per-brand (unique_together with brand) so two brands
   can ship identically-named designs without colliding. BrandMiddleware already
   scopes lookups, so per-brand uniqueness is sufficient.
@@ -54,7 +59,12 @@ class Product(models.Model):
     # Lifecycle
     is_published = models.BooleanField(
         default=True,
-        help_text='Reflects Printify\'s "visible" flag. Hidden products are excluded from /shop/.',
+        help_text=(
+            'Locally owned draft/publish flag — NOT a mirror of Printify\'s '
+            '"visible". New imports land as drafts (False); toggle with the '
+            'Publish / Move-to-draft actions in ct-ops. Only is_published=True '
+            'products appear on /shop/.'
+        ),
     )
     sort_order = models.IntegerField(default=0)
 

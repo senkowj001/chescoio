@@ -143,6 +143,75 @@ def sync_one_product(
     return _sync_one_product_inner(brand, data, stats if stats is not None else _new_stats())
 
 
+def clear_publish_locks(
+    brand: Brand,
+    *,
+    client: PrintifyClient | None = None,
+) -> dict:
+    """
+    Release Printify "Publishing…" locks for every product in `brand`'s shop.
+
+    Pressing Publish in Printify (or a product:publish:started webhook) locks the
+    product card pending a publishing_succeeded / publishing_failed callback, and
+    a locked card cannot be edited. chesco.io feeds the storefront from sync, not
+    from Printify's publish handshake, so we acknowledge every product with
+    publishing_succeeded to clear any stuck locks.
+
+    publishing_succeeded on a product that is NOT currently locked makes Printify
+    return a 4xx; that's expected for most products and is caught per-product and
+    counted in `skipped` (not fatal). Only a failure to *list* products aborts.
+
+    Returns {'products_seen': int, 'acknowledged': int, 'skipped': int}.
+        acknowledged = calls Printify accepted (a lock was, or would have been, released)
+        skipped      = calls Printify rejected (product not in a locked state, or errored)
+
+    Raises:
+        ValueError: brand has no printify_shop_id.
+        PrintifyError: a fatal failure while listing products.
+    """
+    if not brand.printify_shop_id:
+        raise ValueError(
+            f'Brand {brand.name} ({brand.domain}) has no printify_shop_id. '
+            f'Set it via Django admin before running sync.'
+        )
+    if client is None:
+        client = PrintifyClient()
+
+    shop_id = brand.printify_shop_id
+    stats = {'products_seen': 0, 'acknowledged': 0, 'skipped': 0}
+    page = 1
+
+    logger.info('clear_publish_locks start: brand=%s shop=%s', brand.domain, shop_id)
+
+    while True:
+        resp = client.list_products(shop_id, page=page, limit=50)
+        products = resp.get('data') or []
+        for p in products:
+            pid = str(p.get('id') or '')
+            if not pid:
+                continue
+            stats['products_seen'] += 1
+            try:
+                client.publishing_succeeded(shop_id, pid)
+                stats['acknowledged'] += 1
+            except PrintifyError as e:
+                # Most products aren't locked -> Printify returns 4xx here. That's
+                # expected and harmless. Surface only genuinely surprising codes
+                # (auth / 5xx) at warning; everything else is debug noise.
+                stats['skipped'] += 1
+                code = e.status_code
+                if code is None or code >= 500 or code in (401, 403):
+                    logger.warning('publishing_succeeded failed for %s: %s', pid, e)
+                else:
+                    logger.debug('publishing_succeeded no-op for %s (%s)', pid, code)
+        if not resp.get('next_page_url'):
+            break
+        page += 1
+
+    logger.info('clear_publish_locks done: brand=%s stats=%s', brand.domain, stats)
+    return stats
+
+
 # =============================================================================
 # Internals
 # =============================================================================
@@ -170,7 +239,10 @@ def _sync_one_product_inner(brand: Brand, data: dict, stats: dict) -> tuple[Prod
     tags = data.get('tags') or []
     blueprint_id = data.get('blueprint_id') or 0
     print_provider_id = data.get('print_provider_id') or 0
-    is_visible = bool(data.get('visible', True))
+    # NOTE: Printify's `visible` flag is intentionally NOT read here. As of
+    # Sprint 7, `is_published` is a locally-owned draft/publish flag controlled
+    # from ct-ops, not a mirror of Printify. `visible` is unreliable anyway
+    # (it's True even for cards showing "Unpublished").
 
     # ---- Option map: option_value_id (int) -> (kind, value_str) -------------
     # Printify product.options:
@@ -202,20 +274,29 @@ def _sync_one_product_inner(brand: Brand, data: dict, stats: dict) -> tuple[Prod
     ]
     base_price_cents = min(enabled_prices) if enabled_prices else 0
 
+    # `is_published` is deliberately kept OUT of `defaults` so that re-syncing an
+    # existing product never clobbers the draft/publish state John set in ct-ops.
+    # On CREATE we force it to False (draft) via `create_defaults` so new imports
+    # land hidden regardless of the model's default=True.
+    #
+    # Django semantics gotcha: when `create_defaults` is supplied it REPLACES
+    # `defaults` on the create path (it is not merged), so we spread `defaults`
+    # into it and add the one create-only override.
+    defaults = {
+        'brand': brand,
+        'blueprint_id': blueprint_id,
+        'print_provider_id': print_provider_id,
+        'title': title,
+        'slug': slug,
+        'description': description,
+        'tags': tags,
+        'base_retail_price_cents': base_price_cents,
+        'last_synced_at': timezone.now(),
+    }
     product, created = Product.objects.update_or_create(
         printify_product_id=printify_product_id,
-        defaults={
-            'brand': brand,
-            'blueprint_id': blueprint_id,
-            'print_provider_id': print_provider_id,
-            'title': title,
-            'slug': slug,
-            'description': description,
-            'tags': tags,
-            'base_retail_price_cents': base_price_cents,
-            'is_published': is_visible,
-            'last_synced_at': timezone.now(),
-        },
+        defaults=defaults,
+        create_defaults={**defaults, 'is_published': False},
     )
 
     # Brand drift safety net: if a product changes shop ownership.
