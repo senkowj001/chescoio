@@ -56,9 +56,11 @@
       }
     </style>
 
-    {# Plausible analytics — per-brand. Prefers the site-specific script (new
-       pa-*.js format, harder to ad-block); falls back to the classic
-       data-domain script. Mutually exclusive so a brand never double-counts. #}
+    {% comment %}
+    Plausible analytics — per-brand. Prefers the site-specific script (new
+    pa-*.js format, harder to ad-block); falls back to the classic
+    data-domain script. Mutually exclusive so a brand never double-counts.
+    {% endcomment %}
     {% if request.brand.plausible_script_url %}
     <script async src="{{ request.brand.plausible_script_url }}"></script>
     <script>
