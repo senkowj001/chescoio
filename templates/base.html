@@ -56,8 +56,16 @@
       }
     </style>
 
-    {# Plausible — conditional on brand config #}
-    {% if request.brand.plausible_domain %}
+    {# Plausible analytics — per-brand. Prefers the site-specific script (new
+       pa-*.js format, harder to ad-block); falls back to the classic
+       data-domain script. Mutually exclusive so a brand never double-counts. #}
+    {% if request.brand.plausible_script_url %}
+    <script async src="{{ request.brand.plausible_script_url }}"></script>
+    <script>
+      window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+      plausible.init()
+    </script>
+    {% elif request.brand.plausible_domain %}
     <script defer
             data-domain="{{ request.brand.plausible_domain }}"
             src="https://plausible.io/js/script.js"></script>

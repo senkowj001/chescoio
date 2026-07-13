@@ -24,7 +24,7 @@ class BrandAdmin(admin.ModelAdmin):
             'fields': ('printify_shop_id',),
         }),
         ('Analytics / tracking', {
-            'fields': ('meta_pixel_id', 'plausible_domain'),
+            'fields': ('meta_pixel_id', 'plausible_domain', 'plausible_script_url'),
         }),
         ('Email', {
             'fields': ('from_email', 'support_email'),

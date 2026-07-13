@@ -32,6 +32,16 @@ class Brand(models.Model):
     # Analytics / tracking
     meta_pixel_id = models.CharField(max_length=50, blank=True)
     plausible_domain = models.CharField(max_length=255, blank=True)
+    plausible_script_url = models.URLField(
+        blank=True,
+        help_text=(
+            'Plausible site-specific script URL, e.g. '
+            'https://plausible.io/js/pa-XXXX.js (copy from Plausible → site '
+            'settings → install). Preferred over plausible_domain — the site is '
+            'baked into the URL and it\'s harder to ad-block. If set, this is used '
+            'and plausible_domain is ignored.'
+        ),
+    )
 
     # Email
     from_email = models.EmailField()
