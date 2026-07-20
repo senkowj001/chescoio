@@ -342,12 +342,21 @@ def create_order_from_stripe_session(session: dict) -> Optional[Order]:
 
     customer = session.get('customer_details') or {}
     email = customer.get('email') or ''
-    full_name = (customer.get('name') or '').strip()
-    first_name, _, last_name = full_name.partition(' ')
     phone = customer.get('phone') or ''
 
-    shipping = session.get('shipping_details') or {}
-    addr = (shipping.get('address') or {})
+    # Stripe moved the collected shipping address out of the top-level
+    # `shipping_details` field into `collected_information.shipping_details`
+    # (Checkout API change 2025-03-31.basil). This account/webhook runs a 2026
+    # API version, so the legacy top-level field is gone -- read the new
+    # location first, fall back to the old one defensively.
+    collected = session.get('collected_information') or {}
+    shipping = collected.get('shipping_details') or session.get('shipping_details') or {}
+    addr = shipping.get('address') or {}
+
+    # Recipient name: prefer the name entered with the shipping address, then
+    # fall back to the customer/billing name.
+    full_name = (shipping.get('name') or customer.get('name') or '').strip()
+    first_name, _, last_name = full_name.partition(' ')
 
     total_details = session.get('total_details') or {}
 
